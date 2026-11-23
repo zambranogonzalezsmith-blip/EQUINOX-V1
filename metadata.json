@@ -1,0 +1,6 @@
+{
+  "name": "Equinox-Books | Plataforma Contable Multi-Empresa NIC & SENIAT",
+  "description": "Plataforma corporativa multi-empresa para registro contable NIC/VEN-NIF, reportes financieros automáticos, gestión fiscal SENIAT Venezuela y sincronización offline automática.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

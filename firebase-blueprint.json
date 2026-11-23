@@ -1,0 +1,400 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil privado del usuario autenticado con Google en Equinox-Books.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID del usuario.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Correo verificado de Google.",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Nombre público de la cuenta Google.",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "URL del avatar de Google.",
+          "maxLength": 500
+        },
+        "activeCompanyId": {
+          "type": "string",
+          "description": "Última empresa seleccionada por el usuario.",
+          "maxLength": 128
+        },
+        "primaryCompanyId": {
+          "type": "string",
+          "description": "Empresa principal creada desde la plantilla CRM para esta cuenta Google.",
+          "maxLength": 128
+        },
+        "crmCompleted": {
+          "type": "boolean",
+          "description": "Indica si el usuario ya completó su plantilla CRM empresarial."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["superadmin", "user"],
+          "description": "Rol RBAC del sistema: únicamente empresalhadiqainvest@gmail.com es superadmin; todos los demás son user."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "CrmProfile": {
+      "title": "CrmProfile",
+      "description": "Plantilla CRM empresarial completada al registrarse o ingresar con Google para vincular la cuenta a una empresa específica y configurar su privacidad.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "linkedCompanyId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "razonSocial": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 180
+        },
+        "nombreComercial": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "rif": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 14,
+          "pattern": "^[JVEGP]-[0-9]{8}-[0-9]$"
+        },
+        "sectorIndustria": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "tamanoEmpresa": {
+          "type": "string",
+          "enum": ["Micro", "Pequeña", "Mediana", "Gran Empresa", "Firma Contable"]
+        },
+        "representanteNombre": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 140
+        },
+        "representanteCargo": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "telefonoCorporativo": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "whatsappCorporativo": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "domicilioFiscal": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "ciudadEstado": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "sitioWeb": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "tipoContribuyente": {
+          "type": "string",
+          "enum": ["Ordinario", "Especial", "Formal"]
+        },
+        "monedaFuncional": {
+          "type": "string",
+          "enum": ["VES", "USD"]
+        },
+        "contadorResponsable": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "cpcNumero": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "nivelPrivacidad": {
+          "type": "string",
+          "enum": ["ESTRICTO_AISLADO", "AUDITORIA_CORPORATIVA"]
+        },
+        "autenticacionGoogleObligatoria": {
+          "type": "boolean"
+        },
+        "bloquearExportacionExterna": {
+          "type": "boolean"
+        },
+        "notasCrm": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerUid",
+        "ownerEmail",
+        "linkedCompanyId",
+        "razonSocial",
+        "rif",
+        "tamanoEmpresa",
+        "representanteNombre",
+        "tipoContribuyente",
+        "monedaFuncional",
+        "nivelPrivacidad",
+        "autenticacionGoogleObligatoria",
+        "completed",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Company": {
+      "title": "Company",
+      "description": "Entidad jurídica registrada en la plataforma, vinculada y autenticada con Google.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "googleAuthUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "googleAuthEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "googleVerified": {
+          "type": "boolean"
+        },
+        "googleAuthenticatedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "razonSocial": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 180
+        },
+        "rif": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 14,
+          "pattern": "^[JVEGP]-[0-9]{8}-[0-9]$"
+        },
+        "tipoContribuyente": {
+          "type": "string",
+          "enum": ["Ordinario", "Especial", "Formal"]
+        },
+        "actividadEconomica": {
+          "type": "string",
+          "maxLength": 220
+        },
+        "domicilioFiscal": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "telefono": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "monedaFuncional": {
+          "type": "string",
+          "enum": ["VES", "USD"]
+        },
+        "alicuotaIvaGeneral": {
+          "type": "number"
+        },
+        "alicuotaIvaReducida": {
+          "type": "number"
+        },
+        "agenteRetencionIva": {
+          "type": "number"
+        },
+        "agenteRetencionIslr": {
+          "type": "boolean"
+        },
+        "sujetoIgtf": {
+          "type": "boolean"
+        },
+        "unidadTributariaBs": {
+          "type": "number"
+        },
+        "contadorNombre": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "cpcNumero": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "periodoFiscalInicio": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "googleAuthUid",
+        "googleAuthEmail",
+        "googleVerified",
+        "razonSocial",
+        "rif",
+        "tipoContribuyente",
+        "monedaFuncional",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CompanyLedger": {
+      "title": "CompanyLedger",
+      "description": "Libros contables completos (Diario, Catálogo NIC, Inventario NIC 2, Documentos Fiscales, Retenciones ISLR, Tasas BCV, Cierres) por empresa.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "companyId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "catalogo": {
+          "type": "array"
+        },
+        "diario": {
+          "type": "array"
+        },
+        "nextId": {
+          "type": "number"
+        },
+        "exchangeRates": {
+          "type": "object"
+        },
+        "cierres": {
+          "type": "array"
+        },
+        "inventario": {
+          "type": "object"
+        },
+        "documentosFiscales": {
+          "type": "array"
+        },
+        "retencionesIslr": {
+          "type": "array"
+        },
+        "excedenteIvaAnteriorCentavos": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerUid",
+        "companyId",
+        "catalogo",
+        "diario",
+        "nextId",
+        "exchangeRates",
+        "cierres",
+        "inventario",
+        "documentosFiscales",
+        "retencionesIslr",
+        "excedenteIvaAnteriorCentavos",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Perfil privado del usuario o cuenta corporativa autenticada con Google."
+    },
+    "/crm_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/CrmProfile" },
+      "description": "Plantilla CRM empresarial privada por cuenta de correo Google para configuración multi-cuenta, empresa titular y privacidad."
+    },
+    "/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/Company" },
+      "description": "Entidades empresariales venezolanas vinculadas a una cuenta Google verificada."
+    },
+    "/companies/{companyId}/ledgers/{ledgerId}": {
+      "schema": { "$ref": "#/entities/CompanyLedger" },
+      "description": "Estado contable y fiscal aislado por cada entidad empresarial."
+    }
+  }
+}

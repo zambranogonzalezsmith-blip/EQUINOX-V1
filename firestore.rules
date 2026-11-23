@@ -1,0 +1,307 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global hardened primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedGoogleUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Sole Super User & System Admin (Email Spoofing guarded via email_verified == true)
+    function isSuperAdmin() {
+      return isVerifiedGoogleUser()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower() == 'empresalhadiqainvest@gmail.com';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'photoURL', 'activeCompanyId',
+          'primaryCompanyId', 'crmCompleted', 'role', 'createdAt', 'updatedAt'
+        ])
+        && data.uid is string && data.uid == userId && (data.uid == request.auth.uid || isSuperAdmin())
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 140
+        && data.role in ['superadmin', 'user']
+        && (!data.keys().hasAny(['photoURL']) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && (!data.keys().hasAny(['activeCompanyId']) || (data.activeCompanyId is string && data.activeCompanyId.size() <= 128))
+        && (!data.keys().hasAny(['primaryCompanyId']) || (data.primaryCompanyId is string && data.primaryCompanyId.size() <= 128))
+        && (!data.keys().hasAny(['crmCompleted']) || data.crmCompleted is bool)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCrmProfile(data, userId) {
+      return data.keys().hasAll([
+          'ownerUid', 'ownerEmail', 'linkedCompanyId', 'razonSocial', 'rif',
+          'tamanoEmpresa', 'representanteNombre', 'tipoContribuyente',
+          'monedaFuncional', 'nivelPrivacidad', 'autenticacionGoogleObligatoria',
+          'completed', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'ownerEmail', 'linkedCompanyId', 'razonSocial', 'nombreComercial',
+          'rif', 'sectorIndustria', 'tamanoEmpresa', 'representanteNombre',
+          'representanteCargo', 'telefonoCorporativo', 'whatsappCorporativo',
+          'domicilioFiscal', 'ciudadEstado', 'sitioWeb', 'tipoContribuyente',
+          'monedaFuncional', 'contadorResponsable', 'cpcNumero',
+          'nivelPrivacidad', 'autenticacionGoogleObligatoria',
+          'bloquearExportacionExterna', 'notasCrm', 'completed', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerUid is string && data.ownerUid == userId && (data.ownerUid == request.auth.uid || isSuperAdmin())
+        && data.ownerEmail is string && data.ownerEmail.size() >= 3 && data.ownerEmail.size() <= 200
+        && data.linkedCompanyId is string && data.linkedCompanyId.size() >= 2 && data.linkedCompanyId.size() <= 128 && data.linkedCompanyId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.razonSocial is string && data.razonSocial.size() >= 2 && data.razonSocial.size() <= 180
+        && (!data.keys().hasAny(['nombreComercial']) || (data.nombreComercial is string && data.nombreComercial.size() <= 180))
+        && data.rif is string && data.rif.size() >= 10 && data.rif.size() <= 14 && data.rif.matches('^[JVEGP]-[0-9]{8}-[0-9]$')
+        && (!data.keys().hasAny(['sectorIndustria']) || (data.sectorIndustria is string && data.sectorIndustria.size() <= 140))
+        && data.tamanoEmpresa in ['Micro', 'Pequeña', 'Mediana', 'Gran Empresa', 'Firma Contable']
+        && data.representanteNombre is string && data.representanteNombre.size() >= 2 && data.representanteNombre.size() <= 140
+        && (!data.keys().hasAny(['representanteCargo']) || (data.representanteCargo is string && data.representanteCargo.size() <= 100))
+        && (!data.keys().hasAny(['telefonoCorporativo']) || (data.telefonoCorporativo is string && data.telefonoCorporativo.size() <= 40))
+        && (!data.keys().hasAny(['whatsappCorporativo']) || (data.whatsappCorporativo is string && data.whatsappCorporativo.size() <= 40))
+        && (!data.keys().hasAny(['domicilioFiscal']) || (data.domicilioFiscal is string && data.domicilioFiscal.size() <= 300))
+        && (!data.keys().hasAny(['ciudadEstado']) || (data.ciudadEstado is string && data.ciudadEstado.size() <= 120))
+        && (!data.keys().hasAny(['sitioWeb']) || (data.sitioWeb is string && data.sitioWeb.size() <= 200))
+        && data.tipoContribuyente in ['Ordinario', 'Especial', 'Formal']
+        && data.monedaFuncional in ['VES', 'USD']
+        && (!data.keys().hasAny(['contadorResponsable']) || (data.contadorResponsable is string && data.contadorResponsable.size() <= 140))
+        && (!data.keys().hasAny(['cpcNumero']) || (data.cpcNumero is string && data.cpcNumero.size() <= 40))
+        && data.nivelPrivacidad in ['ESTRICTO_AISLADO', 'AUDITORIA_CORPORATIVA']
+        && data.autenticacionGoogleObligatoria is bool
+        && (!data.keys().hasAny(['bloquearExportacionExterna']) || data.bloquearExportacionExterna is bool)
+        && (!data.keys().hasAny(['notasCrm']) || (data.notasCrm is string && data.notasCrm.size() <= 600))
+        && data.completed is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCompany(data, companyId) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'googleAuthUid', 'googleAuthEmail', 'googleVerified',
+          'razonSocial', 'rif', 'tipoContribuyente', 'monedaFuncional',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'googleAuthUid', 'googleAuthEmail', 'googleVerified',
+          'googleAuthenticatedAt', 'razonSocial', 'rif', 'tipoContribuyente',
+          'actividadEconomica', 'domicilioFiscal', 'telefono', 'monedaFuncional',
+          'alicuotaIvaGeneral', 'alicuotaIvaReducida', 'agenteRetencionIva',
+          'agenteRetencionIslr', 'sujetoIgtf', 'unidadTributariaBs',
+          'contadorNombre', 'cpcNumero', 'periodoFiscalInicio',
+          'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id == companyId && data.id.size() >= 2 && data.id.size() <= 128
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && data.googleAuthUid is string && data.googleAuthUid.size() <= 128
+        && data.googleAuthEmail is string && data.googleAuthEmail.size() >= 3 && data.googleAuthEmail.size() <= 200
+        && data.googleVerified is bool
+        && (!data.keys().hasAny(['googleAuthenticatedAt']) || (data.googleAuthenticatedAt is string && data.googleAuthenticatedAt.size() <= 64))
+        && data.razonSocial is string && data.razonSocial.size() >= 2 && data.razonSocial.size() <= 180
+        && data.rif is string && data.rif.size() >= 10 && data.rif.size() <= 14 && data.rif.matches('^[JVEGP]-[0-9]{8}-[0-9]$')
+        && data.tipoContribuyente in ['Ordinario', 'Especial', 'Formal']
+        && (!data.keys().hasAny(['actividadEconomica']) || (data.actividadEconomica is string && data.actividadEconomica.size() <= 220))
+        && (!data.keys().hasAny(['domicilioFiscal']) || (data.domicilioFiscal is string && data.domicilioFiscal.size() <= 300))
+        && (!data.keys().hasAny(['telefono']) || (data.telefono is string && data.telefono.size() <= 40))
+        && data.monedaFuncional in ['VES', 'USD']
+        && (!data.keys().hasAny(['alicuotaIvaGeneral']) || data.alicuotaIvaGeneral is number)
+        && (!data.keys().hasAny(['alicuotaIvaReducida']) || data.alicuotaIvaReducida is number)
+        && (!data.keys().hasAny(['agenteRetencionIva']) || data.agenteRetencionIva in [0, 75, 100])
+        && (!data.keys().hasAny(['agenteRetencionIslr']) || data.agenteRetencionIslr is bool)
+        && (!data.keys().hasAny(['sujetoIgtf']) || data.sujetoIgtf is bool)
+        && (!data.keys().hasAny(['unidadTributariaBs']) || data.unidadTributariaBs is number)
+        && (!data.keys().hasAny(['contadorNombre']) || (data.contadorNombre is string && data.contadorNombre.size() <= 140))
+        && (!data.keys().hasAny(['cpcNumero']) || (data.cpcNumero is string && data.cpcNumero.size() <= 40))
+        && (!data.keys().hasAny(['periodoFiscalInicio']) || (data.periodoFiscalInicio is string && data.periodoFiscalInicio.size() <= 20))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCompanyLedger(data, companyId) {
+      return data.keys().hasAll([
+          'ownerUid', 'companyId', 'catalogo', 'diario', 'nextId',
+          'exchangeRates', 'cierres', 'inventario', 'documentosFiscales',
+          'retencionesIslr', 'excedenteIvaAnteriorCentavos', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'companyId', 'catalogo', 'diario', 'nextId',
+          'exchangeRates', 'cierres', 'inventario', 'documentosFiscales',
+          'retencionesIslr', 'excedenteIvaAnteriorCentavos', 'updatedAt'
+        ])
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && data.companyId is string && data.companyId == companyId && data.companyId.size() <= 128
+        && data.catalogo is list && data.catalogo.size() <= 1000
+        && data.diario is list && data.diario.size() <= 5000
+        && data.nextId is number && data.nextId >= 1
+        && data.exchangeRates is map
+        && data.cierres is list && data.cierres.size() <= 500
+        && data.inventario is map
+        && data.documentosFiscales is list && data.documentosFiscales.size() <= 3000
+        && data.retencionesIslr is list && data.retencionesIslr.size() <= 3000
+        && data.excedenteIvaAnteriorCentavos is number
+        && data.updatedAt is timestamp;
+    }
+
+    function isCompanyOwner(companyId) {
+      return exists(/databases/$(database)/documents/companies/$(companyId))
+        && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
+    }
+
+    // Connection probe document
+    match /test/connection {
+      allow get: if isSignedIn();
+      allow list, write: if false;
+    }
+
+    // User Profiles (PII isolated to owner + sole Super Admin oversight)
+    match /users/{userId} {
+      allow get: if isVerifiedGoogleUser() && isValidId(userId) && (request.auth.uid == userId || isSuperAdmin());
+      allow list: if isSuperAdmin();
+      allow create: if isVerifiedGoogleUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming(), userId)
+        && incoming().email.lower() == request.auth.token.email.lower()
+        && (
+          (isSuperAdmin() && incoming().email.lower() == 'empresalhadiqainvest@gmail.com' && incoming().role == 'superadmin')
+          || (incoming().email.lower() != 'empresalhadiqainvest@gmail.com' && incoming().role == 'user')
+        )
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedGoogleUser()
+        && isValidId(userId)
+        && (request.auth.uid == userId || isSuperAdmin())
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isSuperAdmin() && incoming().email.lower() == 'empresalhadiqainvest@gmail.com' && incoming().role == 'superadmin')
+          || (incoming().email.lower() != 'empresalhadiqainvest@gmail.com' && incoming().role == 'user')
+        )
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'photoURL', 'activeCompanyId', 'primaryCompanyId',
+          'crmCompleted', 'role', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // Private Multi-Account Corporate CRM Profiles (1 Google Email Account = 1 Corporate CRM Profile)
+    match /crm_profiles/{userId} {
+      allow get: if isVerifiedGoogleUser()
+        && isValidId(userId)
+        && (request.auth.uid == userId || isSuperAdmin());
+      allow list: if isSuperAdmin();
+      allow create: if isVerifiedGoogleUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidCrmProfile(incoming(), userId)
+        && incoming().ownerUid == request.auth.uid
+        && incoming().ownerEmail.lower() == request.auth.token.email.lower()
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedGoogleUser()
+        && isValidId(userId)
+        && (existing().ownerUid == request.auth.uid || isSuperAdmin())
+        && isValidCrmProfile(incoming(), userId)
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().ownerEmail == existing().ownerEmail
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'linkedCompanyId', 'razonSocial', 'nombreComercial', 'rif',
+          'sectorIndustria', 'tamanoEmpresa', 'representanteNombre',
+          'representanteCargo', 'telefonoCorporativo', 'whatsappCorporativo',
+          'domicilioFiscal', 'ciudadEstado', 'sitioWeb', 'tipoContribuyente',
+          'monedaFuncional', 'contadorResponsable', 'cpcNumero',
+          'nivelPrivacidad', 'autenticacionGoogleObligatoria',
+          'bloquearExportacionExterna', 'notasCrm', 'completed', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // Multi-Company Profiles (Google-Authenticated Entity Root)
+    match /companies/{companyId} {
+      allow get: if isVerifiedGoogleUser()
+        && isValidId(companyId)
+        && (resource == null || existing().ownerUid == request.auth.uid || isSuperAdmin());
+      allow list: if isVerifiedGoogleUser() && (resource.data.ownerUid == request.auth.uid || isSuperAdmin());
+      allow create: if isVerifiedGoogleUser()
+        && isValidId(companyId)
+        && isValidCompany(incoming(), companyId)
+        && incoming().ownerUid == request.auth.uid
+        && incoming().googleAuthUid == request.auth.uid
+        && incoming().googleAuthEmail.lower() == request.auth.token.email.lower()
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedGoogleUser()
+        && isValidId(companyId)
+        && (existing().ownerUid == request.auth.uid || isSuperAdmin())
+        && isValidCompany(incoming(), companyId)
+        && incoming().id == existing().id
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'googleAuthUid', 'googleAuthEmail', 'googleVerified', 'googleAuthenticatedAt',
+          'razonSocial', 'rif', 'tipoContribuyente', 'actividadEconomica',
+          'domicilioFiscal', 'telefono', 'monedaFuncional',
+          'alicuotaIvaGeneral', 'alicuotaIvaReducida', 'agenteRetencionIva',
+          'agenteRetencionIslr', 'sujetoIgtf', 'unidadTributariaBs',
+          'contadorNombre', 'cpcNumero', 'periodoFiscalInicio', 'updatedAt'
+        ]);
+      allow delete: if isVerifiedGoogleUser() && isValidId(companyId) && (existing().ownerUid == request.auth.uid || isSuperAdmin());
+
+      // Isolated Company Ledgers (Master Gate checks parent /companies/{companyId})
+      match /ledgers/{ledgerId} {
+        allow get: if isVerifiedGoogleUser()
+          && isValidId(companyId)
+          && isValidId(ledgerId)
+          && (isCompanyOwner(companyId) || isSuperAdmin());
+        allow list: if isVerifiedGoogleUser() && (resource.data.ownerUid == request.auth.uid || isSuperAdmin());
+        allow create: if isVerifiedGoogleUser()
+          && isValidId(companyId)
+          && isValidId(ledgerId)
+          && isValidCompanyLedger(incoming(), companyId)
+          && incoming().ownerUid == request.auth.uid
+          && isCompanyOwner(companyId)
+          && incoming().updatedAt == request.time;
+        allow update: if isVerifiedGoogleUser()
+          && isValidId(companyId)
+          && isValidId(ledgerId)
+          && isValidCompanyLedger(incoming(), companyId)
+          && (isCompanyOwner(companyId) || isSuperAdmin())
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().companyId == existing().companyId
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'catalogo', 'diario', 'nextId', 'exchangeRates', 'cierres',
+            'inventario', 'documentosFiscales', 'retencionesIslr',
+            'excedenteIvaAnteriorCentavos', 'updatedAt'
+          ]);
+        allow delete: if isVerifiedGoogleUser() && isValidId(companyId) && isValidId(ledgerId) && (isCompanyOwner(companyId) || isSuperAdmin());
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Allow: /privacidad.html
+Allow: /terminos.html
+Allow: /aviso-legal.html
+Disallow: /api/
+
+Sitemap: /sitemap.xml
