@@ -1,34 +1,69 @@
-import { initializeApp } from 'firebase/app';
+import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
-  User,
+  type Auth,
+  type User,
 } from 'firebase/auth';
 import {
   doc,
+  type Firestore,
   getDocFromServer,
+  getFirestore,
   initializeFirestore,
+  memoryLocalCache,
   persistentLocalCache,
   persistentMultipleTabManager,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+function initFirebaseApp(): FirebaseApp {
+  try {
+    return getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+  } catch (err) {
+    console.warn('Reutilizando instancia Firebase App tras advertencia:', err);
+    return getApp();
+  }
+}
 
+const app = initFirebaseApp();
 const firestoreDatabaseId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-const firestoreSettings = {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager(),
-  }),
-};
 
-export const db = firestoreDatabaseId
-  ? initializeFirestore(app, firestoreSettings, firestoreDatabaseId)
-  : initializeFirestore(app, firestoreSettings);
+function initFirestoreSafe(firebaseApp: FirebaseApp): Firestore {
+  const tryInit = (settings: Parameters<typeof initializeFirestore>[1]): Firestore =>
+    firestoreDatabaseId
+      ? initializeFirestore(firebaseApp, settings, firestoreDatabaseId)
+      : initializeFirestore(firebaseApp, settings);
 
-export const auth = getAuth(app);
+  try {
+    return tryInit({
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+    });
+  } catch {
+    try {
+      return tryInit({
+        localCache: persistentLocalCache(),
+      });
+    } catch {
+      try {
+        return tryInit({
+          localCache: memoryLocalCache(),
+        });
+      } catch {
+        return firestoreDatabaseId
+          ? getFirestore(firebaseApp, firestoreDatabaseId)
+          : getFirestore(firebaseApp);
+      }
+    }
+  }
+}
+
+export const db: Firestore = initFirestoreSafe(app);
+export const auth: Auth = getAuth(app);
 
 export enum OperationType {
   CREATE = 'create',
@@ -223,5 +258,3 @@ export async function signOutGoogle(): Promise<void> {
   clearCachedDriveAccessToken();
   await signOut(auth);
 }
-
-void testFirestoreConnection();

@@ -1,0 +1,10 @@
+node_modules
+dist
+dev-dist
+.data
+.git
+.vercel
+*.log
+bun.lock
+firestore.rules.test.ts
+security_spec.md

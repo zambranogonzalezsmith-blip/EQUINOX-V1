@@ -1,4 +1,4 @@
-import type { CompanyDataset, CompanyProfile, CuentaNIC } from '../types/accounting.ts';
+import type { CompanyDataset, CompanyProfile, CuentaNIC } from '../types/accounting.js';
 
 /**
  * Catálogo base de cuentas NIC / VEN-NIF adaptado al registro contable vigente en Venezuela.

@@ -2,8 +2,8 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
-import {defineConfig} from 'vite';
-import {VitePWA} from 'vite-plugin-pwa';
+import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   return {
@@ -12,13 +12,25 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        includeAssets: [
+          'icon.svg',
+          'apple-touch-icon.png',
+          'pwa-192x192.png',
+          'pwa-512x512.png',
+          'pwa-maskable-512x512.png',
+          'robots.txt',
+          'sitemap.xml',
+          'privacidad.html',
+          'terminos.html',
+          'aviso-legal.html',
+        ],
         manifest: {
           id: '/',
           lang: 'es-VE',
           name: 'Equinox-Books | Sistema Contable Multi-Empresa NIC & SENIAT',
           short_name: 'EquinoxBooks',
-          description: 'Plataforma corporativa multi-empresa para registro contable NIC, gestión fiscal SENIAT Venezuela y sincronización offline.',
+          description:
+            'Plataforma corporativa multi-empresa para registro contable NIC, gestión fiscal SENIAT Venezuela y sincronización offline.',
           theme_color: '#0a0f1d',
           background_color: '#0a0f1d',
           display: 'standalone',
@@ -48,8 +60,19 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          cleanupOutdatedCaches: true,
+          clientsClaim: true,
+          skipWaiting: true,
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-          navigateFallbackDenylist: [/^\/api\//, /^\/__\//],
+          navigateFallbackDenylist: [
+            /^\/api\//,
+            /^\/__\//,
+            /^\/privacidad(\.html)?$/,
+            /^\/terminos(\.html)?$/,
+            /^\/aviso-legal(\.html)?$/,
+            /^\/robots\.txt$/,
+            /^\/sitemap\.xml$/,
+          ],
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           runtimeCaching: [
             {
@@ -97,31 +120,24 @@ export default defineConfig(() => {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'dist');
-          const srcAssets = path.resolve(__dirname, 'src/assets');
+          const distDir = path.resolve(import.meta.dirname, 'dist');
+          const srcAssets = path.resolve(import.meta.dirname, 'src/assets');
           const distAssets = path.resolve(distDir, 'src/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
-            fs.cpSync(srcAssets, distAssets, {recursive: true, force: true});
+            fs.cpSync(srcAssets, distAssets, { recursive: true, force: true });
           }
         },
       },
     ],
     build: {
-      rollupOptions: {
+      chunkSizeWarningLimit: 700,
+      rolldownOptions: {
         output: {
           manualChunks(id: string) {
+            // Solo aislar Firebase SDK; mantener React, React-DOM y Lucide juntos
+            // para evitar dependencias circulares entre chunks en Rolldown/Vite 8.
             if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
               return 'vendor-firebase';
-            }
-            if (id.includes('node_modules/lucide-react')) {
-              return 'vendor-icons';
-            }
-            if (
-              id.includes('node_modules/react/') ||
-              id.includes('node_modules/react-dom/') ||
-              id.includes('node_modules/scheduler/')
-            ) {
-              return 'vendor-react';
             }
             return undefined;
           },
@@ -130,7 +146,7 @@ export default defineConfig(() => {
     },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
       },
     },
     server: {

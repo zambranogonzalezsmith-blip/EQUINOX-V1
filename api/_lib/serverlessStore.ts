@@ -1,28 +1,18 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import type {
   CompanyDataset,
   WorkspaceState,
-} from '../../src/types/accounting.ts';
+} from '../../src/types/accounting.js';
 import {
   createEmptyCompanyDataset,
   DEFAULT_COMPANIES,
-} from '../../src/utils/venezuelaCatalog.ts';
+} from '../../src/utils/venezuelaCatalog.js';
 
-export interface VercelRequestLike {
-  method?: string;
-  body?: unknown;
-  query?: Record<string, string | string[] | undefined>;
-  headers?: Record<string, string | string[] | undefined>;
-}
-
-export interface VercelResponseLike {
-  status: (code: number) => VercelResponseLike;
-  json: (data: unknown) => void;
-  setHeader: (name: string, value: string) => void;
-  end: (chunk?: string) => void;
-}
+export type VercelRequestLike = Pick<VercelRequest, 'method' | 'body' | 'query' | 'headers'>;
+export type VercelResponseLike = Pick<VercelResponse, 'status' | 'json' | 'setHeader' | 'end'>;
 
 export interface ServerStore extends WorkspaceState {
   processedMutationIds: string[];

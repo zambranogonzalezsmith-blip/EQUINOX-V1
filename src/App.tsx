@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import {
   BookOpen,
@@ -15,24 +15,60 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react';
-import { AccountModal } from './components/AccountModal';
-import { ArquitecturaYSyncModule } from './components/ArquitecturaYSyncModule';
-import { CatalogoNICModule } from './components/CatalogoNICModule';
-import { CierresYTipoCambioModule } from './components/CierresYTipoCambioModule';
-import { CrmOnboardingModal } from './components/CrmOnboardingModal';
-import { DriveBackupModal } from './components/DriveBackupModal';
-import { EmpresasModule } from './components/EmpresasModule';
-import { EstadosFinancierosModule } from './components/EstadosFinancierosModule';
-import { ImpuestosVenezuelaModule } from './components/ImpuestosVenezuelaModule';
-import { InventarioNIC2Module } from './components/InventarioNIC2Module';
-import { LegalComplianceModal, type LegalDocTab } from './components/LegalComplianceModal';
+import type { LegalDocTab } from './components/LegalComplianceModal';
 import { LegalConsentBanner } from './components/LegalConsentBanner';
 import { LibroDiarioModule } from './components/LibroDiarioModule';
 import { LibroMayorModule } from './components/LibroMayorModule';
-import { LicenciasModule } from './components/LicenciasModule';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { SplashPresentation } from './components/SplashPresentation';
-import { SuperAdminModule } from './components/SuperAdminModule';
+
+const AccountModal = lazy(() =>
+  import('./components/AccountModal').then((m) => ({ default: m.AccountModal }))
+);
+const ArquitecturaYSyncModule = lazy(() =>
+  import('./components/ArquitecturaYSyncModule').then((m) => ({
+    default: m.ArquitecturaYSyncModule,
+  }))
+);
+const CatalogoNICModule = lazy(() =>
+  import('./components/CatalogoNICModule').then((m) => ({ default: m.CatalogoNICModule }))
+);
+const CierresYTipoCambioModule = lazy(() =>
+  import('./components/CierresYTipoCambioModule').then((m) => ({
+    default: m.CierresYTipoCambioModule,
+  }))
+);
+const CrmOnboardingModal = lazy(() =>
+  import('./components/CrmOnboardingModal').then((m) => ({ default: m.CrmOnboardingModal }))
+);
+const DriveBackupModal = lazy(() =>
+  import('./components/DriveBackupModal').then((m) => ({ default: m.DriveBackupModal }))
+);
+const EmpresasModule = lazy(() =>
+  import('./components/EmpresasModule').then((m) => ({ default: m.EmpresasModule }))
+);
+const EstadosFinancierosModule = lazy(() =>
+  import('./components/EstadosFinancierosModule').then((m) => ({
+    default: m.EstadosFinancierosModule,
+  }))
+);
+const ImpuestosVenezuelaModule = lazy(() =>
+  import('./components/ImpuestosVenezuelaModule').then((m) => ({
+    default: m.ImpuestosVenezuelaModule,
+  }))
+);
+const InventarioNIC2Module = lazy(() =>
+  import('./components/InventarioNIC2Module').then((m) => ({ default: m.InventarioNIC2Module }))
+);
+const LegalComplianceModal = lazy(() =>
+  import('./components/LegalComplianceModal').then((m) => ({ default: m.LegalComplianceModal }))
+);
+const LicenciasModule = lazy(() =>
+  import('./components/LicenciasModule').then((m) => ({ default: m.LicenciasModule }))
+);
+const SuperAdminModule = lazy(() =>
+  import('./components/SuperAdminModule').then((m) => ({ default: m.SuperAdminModule }))
+);
 import {
   auth,
   clearCachedDriveAccessToken,
@@ -91,6 +127,13 @@ const TABS: Array<{ id: ActiveTab; label: string }> = [
   { id: 'arquitectura', label: 'Sync Offline & Arquitectura' },
   { id: 'licencias', label: 'Módulo Licencias' },
 ];
+
+const ModuleLoadingFallback: React.FC = () => (
+  <div className="flex min-h-[220px] items-center justify-center rounded-lg border border-[#2a3b5c]/60 bg-[#0d1527] p-8 text-xs font-semibold tracking-wider text-[#e5c178]">
+    <RefreshCw className="mr-2 h-4 w-4 animate-spin text-[#c5a059]" />
+    Cargando módulo contable...
+  </div>
+);
 
 export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => buildDefaultWorkspace());
@@ -500,7 +543,9 @@ export default function App() {
   );
 
   const activeCompany =
-    workspace.companies.find((c) => c.id === workspace.activeCompanyId) || workspace.companies[0];
+    workspace.companies.find((c) => c.id === workspace.activeCompanyId) ||
+    workspace.companies[0] ||
+    DEFAULT_COMPANIES[0];
   const activeDataset =
     workspace.companyData[activeCompany.id] || createEmptyCompanyDataset();
 
@@ -1778,138 +1823,140 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'catalogo' && (
-            <CatalogoNICModule
-              key={`catalogo-${activeCompany.id}`}
-              dataset={activeDataset}
-              onUpdateDataset={handleUpdateDataset}
-              onNotify={notify}
-            />
-          )}
+          <Suspense fallback={<ModuleLoadingFallback />}>
+            {activeTab === 'catalogo' && (
+              <CatalogoNICModule
+                key={`catalogo-${activeCompany.id}`}
+                dataset={activeDataset}
+                onUpdateDataset={handleUpdateDataset}
+                onNotify={notify}
+              />
+            )}
 
-          {activeTab === 'estados' && (
-            <EstadosFinancierosModule
-              key={`estados-${activeCompany.id}`}
-              company={activeCompany}
-              dataset={activeDataset}
-              onShowAccountDetails={(cod) => setModalAccountCode(cod)}
-            />
-          )}
+            {activeTab === 'estados' && (
+              <EstadosFinancierosModule
+                key={`estados-${activeCompany.id}`}
+                company={activeCompany}
+                dataset={activeDataset}
+                onShowAccountDetails={(cod) => setModalAccountCode(cod)}
+              />
+            )}
 
-          {activeTab === 'fiscal' && (
-            <ImpuestosVenezuelaModule
-              key={`fiscal-${activeCompany.id}`}
-              company={activeCompany}
-              dataset={activeDataset}
-              onUpdateDataset={handleUpdateDataset}
-              onJumpToEditAsiento={handleJumpToEditAsiento}
-              onNotify={notify}
-            />
-          )}
+            {activeTab === 'fiscal' && (
+              <ImpuestosVenezuelaModule
+                key={`fiscal-${activeCompany.id}`}
+                company={activeCompany}
+                dataset={activeDataset}
+                onUpdateDataset={handleUpdateDataset}
+                onJumpToEditAsiento={handleJumpToEditAsiento}
+                onNotify={notify}
+              />
+            )}
 
-          {activeTab === 'inventario' && (
-            <InventarioNIC2Module
-              key={`inventario-${activeCompany.id}`}
-              dataset={activeDataset}
-              onUpdateDataset={handleUpdateDataset}
-              onNotify={notify}
-            />
-          )}
+            {activeTab === 'inventario' && (
+              <InventarioNIC2Module
+                key={`inventario-${activeCompany.id}`}
+                dataset={activeDataset}
+                onUpdateDataset={handleUpdateDataset}
+                onNotify={notify}
+              />
+            )}
 
-          {activeTab === 'cierres' && (
-            <CierresYTipoCambioModule
-              key={`cierres-${activeCompany.id}`}
-              dataset={activeDataset}
-              onUpdateDataset={handleUpdateDataset}
-              onNotify={notify}
-            />
-          )}
+            {activeTab === 'cierres' && (
+              <CierresYTipoCambioModule
+                key={`cierres-${activeCompany.id}`}
+                dataset={activeDataset}
+                onUpdateDataset={handleUpdateDataset}
+                onNotify={notify}
+              />
+            )}
 
-          {activeTab === 'empresas' && (
-            <EmpresasModule
-              companies={workspace.companies}
-              activeCompanyId={activeCompany.id}
-              companyData={workspace.companyData}
-              googleUser={googleUser}
-              isOnline={effectiveOnline}
-              onSelectCompany={(id) => {
-                handleSelectCompany(id);
-                setActiveTab('diario');
-              }}
-              onCreateCompany={handleCreateCompany}
-              onUpdateCompany={handleUpdateCompany}
-              onDeleteCompany={handleDeleteCompany}
-              onAuthenticateCompanyWithGoogle={handleAuthenticateCompanyWithGoogle}
-              onAuthenticateAllLocalCompanies={handleAuthenticateAllLocalCompanies}
-              onNotify={notify}
-              crmProfile={crmProfile}
-              onOpenCrmModal={() => setShowCrmModal(true)}
-              driveConnected={driveConnected}
-              onGoogleSignIn={() => handleGoogleSignIn(false)}
-              onSwitchGoogleAccount={(hint) => handleGoogleSignIn(false, hint)}
-              onConnectGoogleDrive={handleConnectGoogleDrive}
-              onDriveTokenExpired={handleDriveTokenExpired}
-              onRestoreBackup={handleRestoreFromDriveBackup}
-              onBackupCompanyBooksInDrive={(companyId) => {
-                handleSelectCompany(companyId);
-                setShowDriveBackupModal(true);
-              }}
-            />
-          )}
+            {activeTab === 'empresas' && (
+              <EmpresasModule
+                companies={workspace.companies}
+                activeCompanyId={activeCompany.id}
+                companyData={workspace.companyData}
+                googleUser={googleUser}
+                isOnline={effectiveOnline}
+                onSelectCompany={(id) => {
+                  handleSelectCompany(id);
+                  setActiveTab('diario');
+                }}
+                onCreateCompany={handleCreateCompany}
+                onUpdateCompany={handleUpdateCompany}
+                onDeleteCompany={handleDeleteCompany}
+                onAuthenticateCompanyWithGoogle={handleAuthenticateCompanyWithGoogle}
+                onAuthenticateAllLocalCompanies={handleAuthenticateAllLocalCompanies}
+                onNotify={notify}
+                crmProfile={crmProfile}
+                onOpenCrmModal={() => setShowCrmModal(true)}
+                driveConnected={driveConnected}
+                onGoogleSignIn={() => handleGoogleSignIn(false)}
+                onSwitchGoogleAccount={(hint) => handleGoogleSignIn(false, hint)}
+                onConnectGoogleDrive={handleConnectGoogleDrive}
+                onDriveTokenExpired={handleDriveTokenExpired}
+                onRestoreBackup={handleRestoreFromDriveBackup}
+                onBackupCompanyBooksInDrive={(companyId) => {
+                  handleSelectCompany(companyId);
+                  setShowDriveBackupModal(true);
+                }}
+              />
+            )}
 
-          {activeTab === 'arquitectura' && (
-            <ArquitecturaYSyncModule
-              isOnline={isOnline}
-              simulatedOffline={simulatedOffline}
-              onToggleSimulatedOffline={() => {
-                setSimulatedOffline((prev) => {
-                  const next = !prev;
-                  if (!next) {
-                    setTimeout(() => void syncOutboxNow(false), 150);
-                  } else {
-                    notify(
-                      'Simulación de corte de internet activada. Los cambios se encolarán offline.',
-                      'error'
-                    );
-                  }
-                  return next;
-                });
-              }}
-              outbox={outbox}
-              syncLogs={syncLogs}
-              lastServerSync={workspace.lastServerSync}
-              isSyncing={isSyncing}
-              onSyncNow={() => void syncOutboxNow(false)}
-              googleUser={googleUser}
-              crmProfile={crmProfile}
-              companies={workspace.companies}
-              companyData={workspace.companyData}
-              activeCompanyId={activeCompany.id}
-              driveConnected={driveConnected}
-              onGoogleSignIn={() => handleGoogleSignIn(false)}
-              onSwitchGoogleAccount={(hint) => handleGoogleSignIn(false, hint)}
-              onConnectGoogleDrive={handleConnectGoogleDrive}
-              onDriveTokenExpired={handleDriveTokenExpired}
-              onRestoreBackup={handleRestoreFromDriveBackup}
-              onNotify={notify}
-            />
-          )}
+            {activeTab === 'arquitectura' && (
+              <ArquitecturaYSyncModule
+                isOnline={isOnline}
+                simulatedOffline={simulatedOffline}
+                onToggleSimulatedOffline={() => {
+                  setSimulatedOffline((prev) => {
+                    const next = !prev;
+                    if (!next) {
+                      setTimeout(() => void syncOutboxNow(false), 150);
+                    } else {
+                      notify(
+                        'Simulación de corte de internet activada. Los cambios se encolarán offline.',
+                        'error'
+                      );
+                    }
+                    return next;
+                  });
+                }}
+                outbox={outbox}
+                syncLogs={syncLogs}
+                lastServerSync={workspace.lastServerSync}
+                isSyncing={isSyncing}
+                onSyncNow={() => void syncOutboxNow(false)}
+                googleUser={googleUser}
+                crmProfile={crmProfile}
+                companies={workspace.companies}
+                companyData={workspace.companyData}
+                activeCompanyId={activeCompany.id}
+                driveConnected={driveConnected}
+                onGoogleSignIn={() => handleGoogleSignIn(false)}
+                onSwitchGoogleAccount={(hint) => handleGoogleSignIn(false, hint)}
+                onConnectGoogleDrive={handleConnectGoogleDrive}
+                onDriveTokenExpired={handleDriveTokenExpired}
+                onRestoreBackup={handleRestoreFromDriveBackup}
+                onNotify={notify}
+              />
+            )}
 
-          {activeTab === 'licencias' && (
-            <LicenciasModule
-              onOpenPresentation={() => setShowSplash(true)}
-              onOpenLegalDoc={(tab) => setLegalModalTab(tab)}
-            />
-          )}
+            {activeTab === 'licencias' && (
+              <LicenciasModule
+                onOpenPresentation={() => setShowSplash(true)}
+                onOpenLegalDoc={(tab) => setLegalModalTab(tab)}
+              />
+            )}
 
-          {activeTab === 'superadmin' && isSuperAdmin && (
-            <SuperAdminModule
-              googleUser={googleUser}
-              isOnline={effectiveOnline}
-              onAuditCompanyInWorkspace={handleAuditCompanyInWorkspace}
-              onNotify={notify}
-            />
-          )}
+            {activeTab === 'superadmin' && isSuperAdmin && (
+              <SuperAdminModule
+                googleUser={googleUser}
+                isOnline={effectiveOnline}
+                onAuditCompanyInWorkspace={handleAuditCompanyInWorkspace}
+                onNotify={notify}
+              />
+            )}
+          </Suspense>
         </div>
 
         <footer className="my-7 space-y-2 border-t border-[#2a3b5c]/70 pt-5 text-center text-xs text-[#94a3b8]">
@@ -1953,52 +2000,60 @@ export default function App() {
         </footer>
       </div>
 
-      {modalAccountCode && (
-        <AccountModal
-          codigo={modalAccountCode}
-          catalogo={activeDataset.catalogo}
-          diario={activeDataset.diario}
-          onClose={handleCloseAccountModal}
-          onEditAsiento={handleJumpToEditAsiento}
-        />
-      )}
+      <Suspense fallback={null}>
+        {modalAccountCode && (
+          <AccountModal
+            codigo={modalAccountCode}
+            catalogo={activeDataset.catalogo}
+            diario={activeDataset.diario}
+            onClose={handleCloseAccountModal}
+            onEditAsiento={handleJumpToEditAsiento}
+          />
+        )}
 
-      <DriveBackupModal
-        open={showDriveBackupModal}
-        onClose={() => setShowDriveBackupModal(false)}
-        googleUser={googleUser}
-        crmProfile={crmProfile}
-        companies={workspace.companies}
-        companyData={workspace.companyData}
-        activeCompanyId={activeCompany.id}
-        isOnline={effectiveOnline}
-        driveConnected={driveConnected}
-        onGoogleSignIn={() => handleGoogleSignIn(false)}
-        onSwitchGoogleAccount={(hint) => handleGoogleSignIn(false, hint)}
-        onConnectGoogleDrive={handleConnectGoogleDrive}
-        onDriveTokenExpired={handleDriveTokenExpired}
-        onRestoreBackup={handleRestoreFromDriveBackup}
-        onNotify={notify}
-      />
+        {showDriveBackupModal && (
+          <DriveBackupModal
+            open={showDriveBackupModal}
+            onClose={() => setShowDriveBackupModal(false)}
+            googleUser={googleUser}
+            crmProfile={crmProfile}
+            companies={workspace.companies}
+            companyData={workspace.companyData}
+            activeCompanyId={activeCompany.id}
+            isOnline={effectiveOnline}
+            driveConnected={driveConnected}
+            onGoogleSignIn={() => handleGoogleSignIn(false)}
+            onSwitchGoogleAccount={(hint) => handleGoogleSignIn(false, hint)}
+            onConnectGoogleDrive={handleConnectGoogleDrive}
+            onDriveTokenExpired={handleDriveTokenExpired}
+            onRestoreBackup={handleRestoreFromDriveBackup}
+            onNotify={notify}
+          />
+        )}
 
-      <CrmOnboardingModal
-        open={showCrmModal && Boolean(googleUser) && !showSplash}
-        googleUser={googleUser}
-        existingCrm={crmProfile}
-        activeCompany={activeCompany}
-        isSaving={crmSaving}
-        isFirstTimeOnboarding={!crmProfile?.completed}
-        onSaveCrm={handleSaveCrmProfile}
-        onSwitchGoogleAccount={() => handleGoogleSignIn(false)}
-        onClose={() => setShowCrmModal(false)}
-        onNotify={notify}
-      />
+        {showCrmModal && Boolean(googleUser) && !showSplash && (
+          <CrmOnboardingModal
+            open={true}
+            googleUser={googleUser}
+            existingCrm={crmProfile}
+            activeCompany={activeCompany}
+            isSaving={crmSaving}
+            isFirstTimeOnboarding={!crmProfile?.completed}
+            onSaveCrm={handleSaveCrmProfile}
+            onSwitchGoogleAccount={() => handleGoogleSignIn(false)}
+            onClose={() => setShowCrmModal(false)}
+            onNotify={notify}
+          />
+        )}
 
-      <LegalComplianceModal
-        open={legalModalTab !== null}
-        initialTab={legalModalTab || 'privacidad'}
-        onClose={() => setLegalModalTab(null)}
-      />
+        {legalModalTab !== null && (
+          <LegalComplianceModal
+            open={true}
+            initialTab={legalModalTab}
+            onClose={() => setLegalModalTab(null)}
+          />
+        )}
+      </Suspense>
 
       <LegalConsentBanner onOpenLegalDoc={(tab) => setLegalModalTab(tab)} />
     </div>

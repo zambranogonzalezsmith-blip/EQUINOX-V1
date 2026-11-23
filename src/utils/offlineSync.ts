@@ -116,17 +116,32 @@ export function buildDefaultWorkspace(): WorkspaceState {
   };
 }
 
+function normalizeWorkspaceState(ws: WorkspaceState): WorkspaceState {
+  const validCompanies = Array.isArray(ws.companies) && ws.companies.length > 0
+    ? ws.companies
+    : DEFAULT_COMPANIES;
+  const activeId = validCompanies.some((c) => c.id === ws.activeCompanyId)
+    ? ws.activeCompanyId
+    : validCompanies[0].id;
+  return {
+    ...ws,
+    companies: validCompanies,
+    activeCompanyId: activeId,
+    companyData: ws.companyData && typeof ws.companyData === 'object' ? ws.companyData : {},
+  };
+}
+
 export async function loadLocalWorkspace(): Promise<WorkspaceState> {
   const fromIdb = await idbGet<WorkspaceState>('workspace');
   if (fromIdb && Array.isArray(fromIdb.companies) && fromIdb.companies.length > 0) {
-    return fromIdb;
+    return normalizeWorkspaceState(fromIdb);
   }
   try {
     const raw = localStorage.getItem(LS_WORKSPACE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as WorkspaceState;
       if (parsed && Array.isArray(parsed.companies) && parsed.companies.length > 0) {
-        return parsed;
+        return normalizeWorkspaceState(parsed);
       }
     }
   } catch {
@@ -137,13 +152,22 @@ export async function loadLocalWorkspace(): Promise<WorkspaceState> {
   return initial;
 }
 
+let pendingLocalLsTimer: ReturnType<typeof setTimeout> | null = null;
+let latestWorkspaceForLs: WorkspaceState | null = null;
+
 export async function saveLocalWorkspace(workspace: WorkspaceState): Promise<void> {
-  try {
-    localStorage.setItem(LS_WORKSPACE_KEY, JSON.stringify(workspace));
-  } catch {
-    // ignore storage quota errors
-  }
   await idbSet('workspace', workspace);
+  latestWorkspaceForLs = workspace;
+  if (pendingLocalLsTimer) clearTimeout(pendingLocalLsTimer);
+  pendingLocalLsTimer = setTimeout(() => {
+    pendingLocalLsTimer = null;
+    if (!latestWorkspaceForLs) return;
+    try {
+      localStorage.setItem(LS_WORKSPACE_KEY, JSON.stringify(latestWorkspaceForLs));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, 150);
 }
 
 export async function loadOutbox(): Promise<PendingSyncMutation[]> {

@@ -1,18 +1,17 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type {
   CompanyDataset,
   CompanyProfile,
   PendingSyncMutation,
   WorkspaceState,
-} from '../src/types/accounting.ts';
+} from '../src/types/accounting.js';
 import {
   parseRequestBody,
   readServerlessStore,
   writeServerlessStore,
-  type VercelRequestLike,
-  type VercelResponseLike,
-} from './_lib/serverlessStore.ts';
+} from './_lib/serverlessStore.js';
 
-export default function handler(req: VercelRequestLike, res: VercelResponseLike): void {
+export default function handler(req: VercelRequest, res: VercelResponse): void {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     res.status(405).json({ ok: false, error: 'Method Not Allowed' });

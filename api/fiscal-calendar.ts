@@ -1,9 +1,6 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI, Type } from '@google/genai';
-import {
-  parseRequestBody,
-  type VercelRequestLike,
-  type VercelResponseLike,
-} from './_lib/serverlessStore.ts';
+import { parseRequestBody } from './_lib/serverlessStore.js';
 
 interface FiscalDeadlineItem {
   id: string;
@@ -43,8 +40,8 @@ const fiscalCalendarCache = new Map<string, CachedFiscalCalendarResponse>();
 const FISCAL_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
 
 export default async function handler(
-  req: VercelRequestLike,
-  res: VercelResponseLike
+  req: VercelRequest,
+  res: VercelResponse
 ): Promise<void> {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');

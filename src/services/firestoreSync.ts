@@ -299,22 +299,27 @@ export async function fetchUserCompaniesAndLedgers(uid: string): Promise<{
   try {
     const q = query(collection(db, companiesPath), where('ownerUid', '==', uid));
     const snap = await getDocs(q);
+    const ledgerEntries = await Promise.all(
+      snap.docs.map(async (companyDoc) => {
+        const profile = parseCompanyProfile(companyDoc, uid);
+        const ledgerPath = `companies/${profile.id}/ledgers/main`;
+        try {
+          const ledgerSnap = await getDoc(doc(db, 'companies', profile.id, 'ledgers', 'main'));
+          const dataset = ledgerSnap.exists()
+            ? parseLedgerData(ledgerSnap.data())
+            : createEmptyCompanyDataset();
+          return { profile, dataset };
+        } catch (err) {
+          handleFirestoreError(err, OperationType.GET, ledgerPath);
+        }
+      })
+    );
+
     const companies: CompanyProfile[] = [];
     const companyData: Record<string, CompanyDataset> = {};
-
-    for (const companyDoc of snap.docs) {
-      const profile = parseCompanyProfile(companyDoc, uid);
-      companies.push(profile);
-
-      const ledgerPath = `companies/${profile.id}/ledgers/main`;
-      try {
-        const ledgerSnap = await getDoc(doc(db, 'companies', profile.id, 'ledgers', 'main'));
-        companyData[profile.id] = ledgerSnap.exists()
-          ? parseLedgerData(ledgerSnap.data())
-          : createEmptyCompanyDataset();
-      } catch (err) {
-        handleFirestoreError(err, OperationType.GET, ledgerPath);
-      }
+    for (const entry of ledgerEntries) {
+      companies.push(entry.profile);
+      companyData[entry.profile.id] = entry.dataset;
     }
 
     companies.sort((a, b) => a.razonSocial.localeCompare(b.razonSocial));
@@ -368,22 +373,27 @@ export async function fetchAllCompaniesForSuperAdmin(user: User): Promise<{
   const path = 'companies';
   try {
     const snap = await getDocs(collection(db, path));
+    const ledgerEntries = await Promise.all(
+      snap.docs.map(async (companyDoc) => {
+        const profile = parseCompanyProfile(companyDoc, user.uid);
+        const ledgerPath = `companies/${profile.id}/ledgers/main`;
+        try {
+          const ledgerSnap = await getDoc(doc(db, 'companies', profile.id, 'ledgers', 'main'));
+          const dataset = ledgerSnap.exists()
+            ? parseLedgerData(ledgerSnap.data())
+            : createEmptyCompanyDataset();
+          return { profile, dataset };
+        } catch (err) {
+          handleFirestoreError(err, OperationType.GET, ledgerPath);
+        }
+      })
+    );
+
     const companies: CompanyProfile[] = [];
     const companyData: Record<string, CompanyDataset> = {};
-
-    for (const companyDoc of snap.docs) {
-      const profile = parseCompanyProfile(companyDoc, user.uid);
-      companies.push(profile);
-
-      const ledgerPath = `companies/${profile.id}/ledgers/main`;
-      try {
-        const ledgerSnap = await getDoc(doc(db, 'companies', profile.id, 'ledgers', 'main'));
-        companyData[profile.id] = ledgerSnap.exists()
-          ? parseLedgerData(ledgerSnap.data())
-          : createEmptyCompanyDataset();
-      } catch (err) {
-        handleFirestoreError(err, OperationType.GET, ledgerPath);
-      }
+    for (const entry of ledgerEntries) {
+      companies.push(entry.profile);
+      companyData[entry.profile.id] = entry.dataset;
     }
 
     companies.sort((a, b) => a.razonSocial.localeCompare(b.razonSocial));

@@ -1,11 +1,8 @@
-import type { WorkspaceState } from '../src/types/accounting.ts';
-import {
-  readServerlessStore,
-  type VercelRequestLike,
-  type VercelResponseLike,
-} from './_lib/serverlessStore.ts';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { WorkspaceState } from '../src/types/accounting.js';
+import { readServerlessStore } from './_lib/serverlessStore.js';
 
-export default function handler(req: VercelRequestLike, res: VercelResponseLike): void {
+export default function handler(req: VercelRequest, res: VercelResponse): void {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     res.status(405).json({ ok: false, error: 'Method Not Allowed' });

@@ -1,6 +1,6 @@
-import type { VercelRequestLike, VercelResponseLike } from './_lib/serverlessStore.ts';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-export default function handler(req: VercelRequestLike, res: VercelResponseLike): void {
+export default function handler(req: VercelRequest, res: VercelResponse): void {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.setHeader('Allow', 'GET, HEAD');
     res.status(405).json({ ok: false, error: 'Method Not Allowed' });

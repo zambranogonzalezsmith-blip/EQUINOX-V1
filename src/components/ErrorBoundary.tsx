@@ -1,9 +1,10 @@
 import React from 'react';
-import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Trash2 } from 'lucide-react';
 
 interface ErrorBoundaryState {
   hasError: boolean;
   message: string;
+  clearingCache: boolean;
 }
 
 export class ErrorBoundary extends React.Component<
@@ -12,19 +13,42 @@ export class ErrorBoundary extends React.Component<
 > {
   constructor(props: { children: React.ReactNode }) {
     super(props);
-    this.state = { hasError: false, message: '' };
+    this.state = { hasError: false, message: '', clearingCache: false };
   }
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return {
       hasError: true,
-      message: error.message || 'Error inesperado en la plataforma contable.',
+      message: error?.message || 'Error inesperado en la plataforma contable.',
     };
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     console.error('Equinox ErrorBoundary:', error, info);
   }
+
+  private handleClearPwaCacheAndReload = async () => {
+    this.setState({ clearingCache: true });
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      }
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      try {
+        sessionStorage.removeItem('eqx_preload_reload_ts');
+      } catch {
+        // ignore
+      }
+    } catch {
+      // ignore cleanup failures
+    } finally {
+      window.location.reload();
+    }
+  };
 
   render() {
     if (this.state.hasError) {
@@ -51,14 +75,25 @@ export class ErrorBoundary extends React.Component<
             <p className="mt-2 text-xs text-emerald-400">
               Tus asientos y libros locales en IndexedDB permanecen intactos.
             </p>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="mt-6 inline-flex items-center gap-2 rounded-md bg-[#c5a059] px-5 py-2.5 text-xs font-bold text-[#0a0f1d] hover:bg-[#e5c178]"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Reiniciar Plataforma
-            </button>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-[#c5a059] px-5 py-2.5 text-xs font-bold text-[#0a0f1d] hover:bg-[#e5c178]"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reiniciar Plataforma
+              </button>
+              <button
+                type="button"
+                disabled={this.state.clearingCache}
+                onClick={() => void this.handleClearPwaCacheAndReload()}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-[#2a3b5c] bg-[#0a0f1d] px-4 py-2.5 text-xs font-semibold text-[#e5c178] hover:border-[#c5a059] disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {this.state.clearingCache ? 'Limpiando caché...' : 'Limpiar Caché PWA y Reintentar'}
+              </button>
+            </div>
           </div>
         </div>
       );
