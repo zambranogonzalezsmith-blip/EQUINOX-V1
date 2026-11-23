@@ -4,16 +4,13 @@ import express from 'express';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
-import type {
-  CompanyDataset,
-  CompanyProfile,
-  PendingSyncMutation,
-  WorkspaceState,
-} from './src/types/accounting.ts';
+import type { PendingSyncMutation } from './src/types/accounting.ts';
+import { authenticateFirebaseRequest } from './api/_lib/firebaseAuth.ts';
+import { createFirestoreRestAdapter, FirestoreRestError } from './api/_lib/firestoreRest.ts';
 import {
-  createEmptyCompanyDataset,
-  DEFAULT_COMPANIES,
-} from './src/utils/venezuelaCatalog.ts';
+  handleAuthorizedSyncPost,
+  handleAuthorizedWorkspaceGet,
+} from './api/_lib/workspaceService.ts';
 
 const ai = process.env.GEMINI_API_KEY
   ? new GoogleGenAI({
@@ -64,57 +61,6 @@ const fiscalCalendarCache = new Map<string, CachedFiscalCalendarResponse>();
 const FISCAL_CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6 horas
 
 const PORT = Number(process.env.PORT || 3000);
-const DATA_DIR = path.resolve(process.cwd(), '.data');
-const STORE_FILE = path.join(DATA_DIR, 'equinox-workspace.json');
-
-interface ServerStore extends WorkspaceState {
-  processedMutationIds: string[];
-}
-
-function buildInitialStore(): ServerStore {
-  const companyData: Record<string, CompanyDataset> = {};
-  for (const company of DEFAULT_COMPANIES) {
-    companyData[company.id] = createEmptyCompanyDataset();
-  }
-  return {
-    companies: DEFAULT_COMPANIES,
-    activeCompanyId: DEFAULT_COMPANIES[0].id,
-    companyData,
-    lastServerSync: new Date().toISOString(),
-    processedMutationIds: [],
-  };
-}
-
-function readStore(): ServerStore {
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    if (!fs.existsSync(STORE_FILE)) {
-      const initial = buildInitialStore();
-      fs.writeFileSync(STORE_FILE, JSON.stringify(initial, null, 2), 'utf-8');
-      return initial;
-    }
-    const raw = fs.readFileSync(STORE_FILE, 'utf-8');
-    const parsed = JSON.parse(raw) as ServerStore;
-    if (!parsed || !Array.isArray(parsed.companies) || parsed.companies.length === 0) {
-      const initial = buildInitialStore();
-      fs.writeFileSync(STORE_FILE, JSON.stringify(initial, null, 2), 'utf-8');
-      return initial;
-    }
-    parsed.processedMutationIds = parsed.processedMutationIds || [];
-    return parsed;
-  } catch {
-    return buildInitialStore();
-  }
-}
-
-function writeStore(store: ServerStore): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), 'utf-8');
-}
 
 async function startServer() {
   const app = express();
@@ -147,100 +93,71 @@ async function startServer() {
     res.json({ ok: true, serverTime: new Date().toISOString() });
   });
 
-  // Retrieve full multi-company workspace
-  app.get('/api/workspace', (_req, res) => {
-    const store = readStore();
-    const workspace: WorkspaceState = {
-      companies: store.companies,
-      activeCompanyId: store.activeCompanyId,
-      companyData: store.companyData,
-      lastServerSync: store.lastServerSync,
-    };
-    res.json(workspace);
+  // Retrieve authorized multi-company workspace from Cloud Firestore
+  app.get('/api/workspace', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    let caller;
+    try {
+      caller = await authenticateFirebaseRequest(req.headers.authorization);
+    } catch (err) {
+      res.status(401).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Autenticación requerida.',
+      });
+      return;
+    }
+
+    try {
+      const adapter = createFirestoreRestAdapter(caller.idToken);
+      const result = await handleAuthorizedWorkspaceGet(
+        caller,
+        adapter,
+        typeof req.query?.scope === 'string' ? req.query.scope : undefined
+      );
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      if (err instanceof FirestoreRestError) {
+        res.status(err.status).json({ ok: false, error: err.message, code: err.code });
+        return;
+      }
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Error al consultar Firestore.',
+      });
+    }
   });
 
-  // Batch synchronization endpoint (idempotent outbox processing)
-  app.post('/api/sync', (req, res) => {
+  // Authorized & validated batch synchronization endpoint backed by Cloud Firestore
+  app.post('/api/sync', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    let caller;
     try {
-      const body = req.body as {
+      caller = await authenticateFirebaseRequest(req.headers.authorization);
+    } catch (err) {
+      res.status(401).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Autenticación requerida.',
+      });
+      return;
+    }
+
+    try {
+      const body = (req.body || {}) as {
         mutations?: PendingSyncMutation[];
         activeCompanyId?: string;
       };
-      const mutations = Array.isArray(body?.mutations) ? body.mutations : [];
-      const store = readStore();
-      let syncedCount = 0;
-
-      for (const mut of mutations) {
-        if (!mut || !mut.id) continue;
-        if (store.processedMutationIds.includes(mut.id)) {
-          continue; // Idempotent skip
-        }
-
-        if (mut.deletedCompanyId) {
-          store.companies = store.companies.filter((c) => c.id !== mut.deletedCompanyId);
-          delete store.companyData[mut.deletedCompanyId];
-          if (store.activeCompanyId === mut.deletedCompanyId && store.companies.length > 0) {
-            store.activeCompanyId = store.companies[0].id;
-          }
-        }
-
-        if (mut.companySnapshot) {
-          const incomingCompany = mut.companySnapshot as CompanyProfile;
-          const idx = store.companies.findIndex((c) => c.id === incomingCompany.id);
-          if (idx >= 0) {
-            const currentTs = Date.parse(store.companies[idx].updatedAt || '1970-01-01');
-            const incomingTs = Date.parse(incomingCompany.updatedAt || mut.timestamp);
-            if (incomingTs >= currentTs) {
-              store.companies[idx] = incomingCompany;
-            }
-          } else {
-            store.companies.push(incomingCompany);
-          }
-        }
-
-        if (mut.datasetSnapshot && mut.companyId) {
-          const incomingData = mut.datasetSnapshot as CompanyDataset;
-          const existing = store.companyData[mut.companyId];
-          if (!existing) {
-            store.companyData[mut.companyId] = incomingData;
-          } else {
-            const currentTs = Date.parse(existing.updatedAt || '1970-01-01');
-            const incomingTs = Date.parse(incomingData.updatedAt || mut.timestamp);
-            if (incomingTs >= currentTs) {
-              store.companyData[mut.companyId] = incomingData;
-            }
-          }
-        }
-
-        store.processedMutationIds.push(mut.id);
-        // Keep last 500 idempotency IDs
-        if (store.processedMutationIds.length > 500) {
-          store.processedMutationIds = store.processedMutationIds.slice(-500);
-        }
-        syncedCount++;
-      }
-
-      if (body?.activeCompanyId && store.companies.some((c) => c.id === body.activeCompanyId)) {
-        store.activeCompanyId = body.activeCompanyId;
-      }
-
-      store.lastServerSync = new Date().toISOString();
-      writeStore(store);
-
-      const workspace: WorkspaceState = {
-        companies: store.companies,
-        activeCompanyId: store.activeCompanyId,
-        companyData: store.companyData,
-        lastServerSync: store.lastServerSync,
-      };
-
-      res.json({
-        ok: true,
-        syncedCount,
-        serverTime: store.lastServerSync,
-        workspace,
-      });
+      const adapter = createFirestoreRestAdapter(caller.idToken);
+      const result = await handleAuthorizedSyncPost(caller, adapter, body);
+      res.status(result.status).json(result.body);
     } catch (err) {
+      if (err instanceof FirestoreRestError) {
+        res.status(err.status).json({
+          ok: false,
+          error: err.message,
+          code: err.code,
+        });
+        return;
+      }
       res.status(500).json({
         ok: false,
         error: err instanceof Error ? err.message : 'Error interno de sincronización',

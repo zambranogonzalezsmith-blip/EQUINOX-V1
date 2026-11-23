@@ -71,6 +71,7 @@ const SuperAdminModule = lazy(() =>
 );
 import {
   auth,
+  classifyFirestoreError,
   clearCachedDriveAccessToken,
   connectGoogleDriveForUser,
   getDriveAccessTokenForUser,
@@ -113,7 +114,28 @@ import {
   saveSyncLogs,
 } from './utils/offlineSync';
 import { isSuperAdminEmail, resolveUserRole, SUPER_ADMIN_EMAIL } from './utils/rbac';
+import { reconcileWorkspaceState } from './utils/reconcileWorkspace';
 import { createEmptyCompanyDataset, DEFAULT_COMPANIES } from './utils/venezuelaCatalog';
+
+const ALLOWED_MUTATION_ACTIONS = new Set<PendingSyncMutation['actionType']>([
+  'DATASET_UPDATE',
+  'COMPANY_CREATE',
+  'COMPANY_UPDATE',
+  'COMPANY_DELETE',
+]);
+
+function canCallerMutateCompany(
+  company: CompanyProfile | undefined | null,
+  user: User | null
+): boolean {
+  if (!company) return false;
+  if (!user) {
+    return !company.ownerUid;
+  }
+  if (!user.emailVerified) return false;
+  if (isSuperAdminEmail(user.email)) return true;
+  return !company.ownerUid || company.ownerUid === user.uid;
+}
 
 const TABS: Array<{ id: ActiveTab; label: string }> = [
   { id: 'diario', label: 'Libro Diario' },
@@ -237,81 +259,140 @@ export default function App() {
       const currentQueue = outboxRef.current;
       if (currentQueue.length === 0) return;
 
+      const activeAuthUser = googleUserRef.current;
+      if (!activeAuthUser || !activeAuthUser.emailVerified) {
+        if (!silent) {
+          notify(
+            'Inicia sesión con una cuenta Google verificada para sincronizar con el servidor y Cloud Firestore.',
+            'error'
+          );
+        }
+        return;
+      }
+
       syncInFlightRef.current = true;
       setIsSyncing(true);
       try {
-        // 1. Sincronizar mutaciones con Express /api/sync
-        const res = await pushOutboxToServer(currentQueue, workspaceRef.current.activeCompanyId);
+        const idToken = await activeAuthUser.getIdToken();
+        const res = await pushOutboxToServer(
+          currentQueue,
+          workspaceRef.current.activeCompanyId,
+          idToken
+        );
 
-        // 2. Sincronizar con Cloud Firestore si hay sesión Google verificada
-        const activeAuthUser = googleUserRef.current;
-        if (activeAuthUser && activeAuthUser.emailVerified) {
-          const latestWs = workspaceRef.current;
-          const touchedCompanies = new Set(currentQueue.map((m) => m.companyId));
-          for (const mut of currentQueue) {
-            if (mut.actionType === 'COMPANY_DELETE' && mut.deletedCompanyId) {
-              await deleteCompanyFromFirestore(mut.deletedCompanyId);
-            }
-          }
-          for (const cid of touchedCompanies) {
-            const prof = latestWs.companies.find((c) => c.id === cid);
-            const canSync =
-              prof &&
-              (!prof.ownerUid ||
-                prof.ownerUid === activeAuthUser.uid ||
-                isSuperAdminEmail(activeAuthUser.email));
-            if (canSync && prof) {
-              const linkedProf: CompanyProfile = prof.ownerUid
-                ? prof
-                : {
-                    ...prof,
-                    ownerUid: activeAuthUser.uid,
-                    googleAuthUid: activeAuthUser.uid,
-                    googleAuthEmail: activeAuthUser.email || prof.googleAuthEmail || '',
-                    googleVerified: true,
-                    googleAuthenticatedAt:
-                      prof.googleAuthenticatedAt || new Date().toISOString(),
-                  };
-              await saveCompanyToFirestore(
-                activeAuthUser,
-                linkedProf,
-                latestWs.companyData[cid]
-              );
-            }
-          }
-        }
-
-        if (res.ok) {
-          const syncedIds = new Set(currentQueue.map((m) => m.id));
-          setOutbox((prev) => {
-            const remaining = prev.filter((m) => !syncedIds.has(m.id));
-            void saveOutbox(remaining);
-            return remaining;
-          });
-          setWorkspace((prev) => {
-            const updated: WorkspaceState = res.workspace
-              ? {
-                  ...prev,
-                  lastServerSync: res.serverTime || new Date().toISOString(),
-                }
-              : { ...prev, lastServerSync: res.serverTime || new Date().toISOString() };
-            void saveLocalWorkspace(updated);
-            return updated;
-          });
+        if (res.status === 401) {
           await appendSyncLog(
-            'SYNCED',
-            `Sincronización automática completada (${currentQueue.length} cambio(s))`,
-            currentQueue.length
+            'ERROR',
+            res.error || 'Sesión expirada o no autorizada al sincronizar con /api/sync',
+            0
           );
           if (!silent) {
             notify(
-              `Conexión restablecida: ${currentQueue.length} operación(es) sincronizada(s) automáticamente.`,
-              'success'
+              res.error || 'Tu sesión Google expiró. Vuelve a iniciar sesión para sincronizar.',
+              'error'
+            );
+          }
+          return;
+        }
+
+        const rejectedList = res.rejectedMutations || [];
+        const rejectedIds = new Set(rejectedList.map((r) => r.id));
+
+        if (rejectedList.length > 0) {
+          const firstReason = rejectedList[0].error;
+          await appendSyncLog(
+            'ERROR',
+            `${rejectedList.length} mutación(es) rechazada(s) por autorización/validación: ${firstReason}`,
+            rejectedList.length
+          );
+          notify(`Operación restringida por seguridad: ${firstReason}`, 'error');
+        }
+
+        if (res.ok) {
+          const idsToRemove = new Set(currentQueue.map((m) => m.id));
+          const remainingOutbox = outboxRef.current.filter((m) => !idsToRemove.has(m.id));
+          outboxRef.current = remainingOutbox;
+          setOutbox(remainingOutbox);
+          void saveOutbox(remainingOutbox);
+
+          const reconciled = reconcileWorkspaceState(
+            workspaceRef.current,
+            res.workspace,
+            remainingOutbox,
+            res.serverTime
+          );
+          workspaceRef.current = reconciled;
+          setWorkspace(reconciled);
+          await saveLocalWorkspace(reconciled);
+
+          const acceptedCount = currentQueue.length - rejectedIds.size;
+          if (acceptedCount > 0) {
+            await appendSyncLog(
+              'SYNCED',
+              `Sincronización autorizada completada (${acceptedCount} cambio(s))`,
+              acceptedCount
+            );
+            if (!silent) {
+              notify(
+                `Conexión restablecida: ${acceptedCount} operación(es) sincronizada(s) y reconciliadas.`,
+                'success'
+              );
+            }
+          }
+          return;
+        }
+
+        if (rejectedIds.size > 0) {
+          const remainingOutbox = outboxRef.current.filter((m) => !rejectedIds.has(m.id));
+          outboxRef.current = remainingOutbox;
+          setOutbox(remainingOutbox);
+          void saveOutbox(remainingOutbox);
+          return;
+        }
+
+        // Respaldo directo a Firestore SDK si el endpoint /api/sync devolvió error transitorio (5xx o red)
+        if (res.status === 0 || res.status >= 500) {
+          const latestWs = workspaceRef.current;
+          const syncedClientIds = new Set<string>();
+          for (const mut of currentQueue) {
+            if (!ALLOWED_MUTATION_ACTIONS.has(mut.actionType)) continue;
+            try {
+              if (mut.actionType === 'COMPANY_DELETE' && mut.deletedCompanyId) {
+                await deleteCompanyFromFirestore(mut.deletedCompanyId);
+                syncedClientIds.add(mut.id);
+              } else {
+                const prof = latestWs.companies.find((c) => c.id === mut.companyId);
+                if (prof && canCallerMutateCompany(prof, activeAuthUser)) {
+                  await saveCompanyToFirestore(activeAuthUser, prof, latestWs.companyData[prof.id]);
+                  syncedClientIds.add(mut.id);
+                }
+              }
+            } catch (fsErr) {
+              const classified = classifyFirestoreError(fsErr);
+              await appendSyncLog('ERROR', `[${classified.category}] ${classified.userMessage}`, 0);
+              if (
+                classified.category === 'PERMISSION_DENIED' ||
+                classified.category === 'UNAUTHENTICATED'
+              ) {
+                notify(classified.userMessage, 'error');
+              }
+            }
+          }
+          if (syncedClientIds.size > 0) {
+            const remainingOutbox = outboxRef.current.filter((m) => !syncedClientIds.has(m.id));
+            outboxRef.current = remainingOutbox;
+            setOutbox(remainingOutbox);
+            void saveOutbox(remainingOutbox);
+            await appendSyncLog(
+              'SYNCED',
+              `Respaldo directo a Cloud Firestore completado (${syncedClientIds.size} cambio(s))`,
+              syncedClientIds.size
             );
           }
         }
-      } catch {
-        await appendSyncLog('ERROR', 'Error temporal al sincronizar con el servidor/nube', 0);
+      } catch (err) {
+        const classified = classifyFirestoreError(err);
+        await appendSyncLog('ERROR', `[${classified.category}] ${classified.userMessage}`, 0);
       } finally {
         syncInFlightRef.current = false;
         setIsSyncing(false);
@@ -320,7 +401,7 @@ export default function App() {
     [appendSyncLog, notify, simulatedOffline]
   );
 
-  // Hidratación local-first (IndexedDB) + reconciliación inicial
+  // Hidratación local-first (IndexedDB)
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -340,15 +421,6 @@ export default function App() {
       const reachable = await checkServerConnectivity();
       if (!mounted) return;
       setIsOnline(reachable);
-
-      if (reachable && localOutbox.length === 0) {
-        const serverWs = await fetchServerWorkspace();
-        if (serverWs && mounted && !googleUserRef.current) {
-          workspaceRef.current = serverWs;
-          setWorkspace(serverWs);
-          await saveLocalWorkspace(serverWs);
-        }
-      }
     })();
 
     return () => {
@@ -378,10 +450,12 @@ export default function App() {
       setAuthError(null);
 
       try {
+        const idToken = await user.getIdToken();
         await upsertUserProfile(user, workspaceRef.current.activeCompanyId);
-        const [cloud, fetchedCrm] = await Promise.all([
+        const [cloud, fetchedCrm, serverWs] = await Promise.all([
           fetchUserCompaniesAndLedgers(user.uid),
           fetchCrmProfile(user.uid),
+          fetchServerWorkspace(idToken).catch(() => null),
         ]);
         setCrmProfile(fetchedCrm);
         if (!fetchedCrm || !fetchedCrm.completed) {
@@ -389,12 +463,18 @@ export default function App() {
         }
         const now = new Date().toISOString();
 
-        if (cloud.companies.length > 0) {
-          // Verificar si hay alguna empresa local específica recién autenticada por este usuario
+        const effectiveCloud =
+          cloud.companies.length > 0
+            ? cloud
+            : serverWs && serverWs.companies.length > 0
+              ? { companies: serverWs.companies, companyData: serverWs.companyData }
+              : cloud;
+
+        if (effectiveCloud.companies.length > 0) {
           const targetClaimId = claimCompanyIdRef.current;
           claimCompanyIdRef.current = null;
-          let mergedCompanies = cloud.companies;
-          let mergedData = cloud.companyData;
+          let mergedCompanies = effectiveCloud.companies;
+          let mergedData = effectiveCloud.companyData;
 
           if (targetClaimId) {
             const localTarget = workspaceRef.current.companies.find(
@@ -425,15 +505,21 @@ export default function App() {
                 ? workspaceRef.current.activeCompanyId
                 : mergedCompanies[0].id;
 
-          const nextWs: WorkspaceState = {
+          const cloudSnapshot: WorkspaceState = {
             companies: mergedCompanies,
             activeCompanyId: preferredId,
             companyData: mergedData,
             lastServerSync: now,
           };
-          workspaceRef.current = nextWs;
-          setWorkspace(nextWs);
-          await saveLocalWorkspace(nextWs);
+          const reconciledWs = reconcileWorkspaceState(
+            workspaceRef.current,
+            cloudSnapshot,
+            outboxRef.current,
+            now
+          );
+          workspaceRef.current = reconciledWs;
+          setWorkspace(reconciledWs);
+          await saveLocalWorkspace(reconciledWs);
         } else {
           // Primera vez de este usuario Google: vincular empresas locales sin propietario u originar entidades base con ID único por usuario
           const uidSuffix = user.uid.slice(0, 8);
@@ -480,12 +566,18 @@ export default function App() {
           void syncOutboxNow(true);
         }
       } catch (err) {
-        console.error('Error sincronizando sesión Google:', err);
+        const classified = classifyFirestoreError(err);
+        if (classified.category === 'NETWORK_OFFLINE') {
+          await appendSyncLog('QUEUED_OFFLINE', classified.userMessage, 0);
+        } else {
+          setAuthError(classified.userMessage);
+          notify(classified.userMessage, 'error');
+        }
       }
     });
 
     return () => unsubscribe();
-  }, [syncOutboxNow]);
+  }, [appendSyncLog, notify, syncOutboxNow]);
 
   // Listeners online/offline + sondeo automático de reconexión
   useEffect(() => {
@@ -527,6 +619,11 @@ export default function App() {
 
   const enqueueMutation = useCallback(
     async (mutation: PendingSyncMutation) => {
+      if (!ALLOWED_MUTATION_ACTIONS.has(mutation.actionType)) {
+        notify(`Tipo de mutación no permitido (${String(mutation.actionType)}).`, 'error');
+        return;
+      }
+
       const nextQueue = compactOutboxQueue([...outboxRef.current, mutation]);
       outboxRef.current = nextQueue;
       setOutbox(nextQueue);
@@ -539,7 +636,7 @@ export default function App() {
 
       void syncOutboxNow(true);
     },
-    [appendSyncLog, simulatedOffline, syncOutboxNow]
+    [appendSyncLog, notify, simulatedOffline, syncOutboxNow]
   );
 
   const activeCompany =
@@ -750,6 +847,16 @@ export default function App() {
         workspaceRef.current.companies.find(
           (c) => c.id === workspaceRef.current.activeCompanyId
         ) || workspaceRef.current.companies[0];
+
+      const currentUser = googleUserRef.current;
+      if (!canCallerMutateCompany(targetCompany, currentUser)) {
+        notify(
+          `Acceso denegado: no puedes modificar libros contables de ${targetCompany?.razonSocial || 'esta empresa'}.`,
+          'error'
+        );
+        return;
+      }
+
       const prevDataset =
         workspaceRef.current.companyData[targetCompany.id] || createEmptyCompanyDataset();
       const nextDataset: CompanyDataset = {
@@ -769,10 +876,13 @@ export default function App() {
       setWorkspace(nextWs);
       void saveLocalWorkspace(nextWs);
 
-      if (googleUserRef.current && !simulatedOffline && isOnline) {
-        const ledgerOwnerUid = targetCompany.ownerUid || googleUserRef.current.uid;
-        void saveLedgerToFirestore(ledgerOwnerUid, targetCompany.id, nextDataset).catch(() => {
-          // Queda respaldado en IndexedDB y en la cola Outbox
+      if (currentUser && !simulatedOffline && isOnline) {
+        const ledgerOwnerUid = targetCompany.ownerUid || currentUser.uid;
+        void saveLedgerToFirestore(ledgerOwnerUid, targetCompany.id, nextDataset).catch((err) => {
+          const classified = classifyFirestoreError(err);
+          if (classified.category !== 'NETWORK_OFFLINE') {
+            notify(classified.userMessage, 'error');
+          }
         });
       }
 
@@ -786,7 +896,7 @@ export default function App() {
         datasetSnapshot: nextDataset,
       });
     },
-    [enqueueMutation, isOnline, simulatedOffline]
+    [enqueueMutation, isOnline, notify, simulatedOffline]
   );
 
   const handleSelectCompany = useCallback((id: string) => {
@@ -799,73 +909,142 @@ export default function App() {
       return next;
     });
     if (googleUserRef.current) {
-      void upsertUserProfile(googleUserRef.current, id).catch(() => {});
+      void upsertUserProfile(googleUserRef.current, id).catch((err) => {
+        const classified = classifyFirestoreError(err);
+        if (classified.category === 'PERMISSION_DENIED' || classified.category === 'UNAUTHENTICATED') {
+          notify(classified.userMessage, 'error');
+        }
+      });
     }
-  }, []);
+  }, [notify]);
 
   const handleCreateCompany = (company: CompanyProfile) => {
+    const currentUser = googleUserRef.current;
+    if (
+      currentUser &&
+      company.ownerUid &&
+      company.ownerUid !== currentUser.uid &&
+      !isSuperAdminEmail(currentUser.email)
+    ) {
+      notify('Acceso denegado: no puedes crear empresas asignadas a otro usuario.', 'error');
+      return;
+    }
+
+    const enforcedCompany: CompanyProfile =
+      currentUser && currentUser.emailVerified
+        ? {
+            ...company,
+            ownerUid: company.ownerUid || currentUser.uid,
+            googleAuthUid: company.googleAuthUid || currentUser.uid,
+            googleAuthEmail: company.googleAuthEmail || currentUser.email || '',
+            googleVerified: true,
+          }
+        : company;
+
     const newDataset = createEmptyCompanyDataset();
     setWorkspace((prev) => {
       const next: WorkspaceState = {
         ...prev,
-        companies: [...prev.companies, company],
-        activeCompanyId: company.id,
-        companyData: { ...prev.companyData, [company.id]: newDataset },
+        companies: [...prev.companies, enforcedCompany],
+        activeCompanyId: enforcedCompany.id,
+        companyData: { ...prev.companyData, [enforcedCompany.id]: newDataset },
       };
       workspaceRef.current = next;
       void saveLocalWorkspace(next);
       return next;
     });
 
-    if (googleUserRef.current && !simulatedOffline && isOnline) {
-      void saveCompanyToFirestore(googleUserRef.current, company, newDataset).catch(() => {});
+    if (currentUser && !simulatedOffline && isOnline) {
+      void saveCompanyToFirestore(currentUser, enforcedCompany, newDataset).catch((err) => {
+        const classified = classifyFirestoreError(err);
+        if (classified.category !== 'NETWORK_OFFLINE') {
+          notify(classified.userMessage, 'error');
+        }
+      });
     }
 
     void enqueueMutation({
       id: `mut-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       timestamp: new Date().toISOString(),
-      companyId: company.id,
-      companyName: company.razonSocial,
+      companyId: enforcedCompany.id,
+      companyName: enforcedCompany.razonSocial,
       actionType: 'COMPANY_CREATE',
-      summary: `Creación de entidad ${company.razonSocial} (${company.rif})`,
-      companySnapshot: company,
+      summary: `Creación de entidad ${enforcedCompany.razonSocial} (${enforcedCompany.rif})`,
+      companySnapshot: enforcedCompany,
       datasetSnapshot: newDataset,
     });
   };
 
   const handleUpdateCompany = (company: CompanyProfile) => {
+    const existing = workspaceRef.current.companies.find((c) => c.id === company.id);
+    const currentUser = googleUserRef.current;
+    if (!canCallerMutateCompany(existing || company, currentUser)) {
+      notify(
+        `Acceso denegado: no puedes modificar el perfil fiscal de ${company.razonSocial}.`,
+        'error'
+      );
+      return;
+    }
+    if (
+      existing?.ownerUid &&
+      company.ownerUid &&
+      company.ownerUid !== existing.ownerUid &&
+      !(currentUser && isSuperAdminEmail(currentUser.email))
+    ) {
+      notify('Operación denegada: no está permitido transferir la propiedad (ownerUid).', 'error');
+      return;
+    }
+
+    const sanitizedCompany: CompanyProfile = existing?.ownerUid
+      ? { ...company, ownerUid: existing.ownerUid }
+      : company;
+
     setWorkspace((prev) => {
       const next: WorkspaceState = {
         ...prev,
-        companies: prev.companies.map((c) => (c.id === company.id ? company : c)),
+        companies: prev.companies.map((c) => (c.id === sanitizedCompany.id ? sanitizedCompany : c)),
       };
       workspaceRef.current = next;
       void saveLocalWorkspace(next);
       return next;
     });
 
-    if (googleUserRef.current && !simulatedOffline && isOnline) {
+    if (currentUser && !simulatedOffline && isOnline) {
       void saveCompanyToFirestore(
-        googleUserRef.current,
-        company,
-        workspaceRef.current.companyData[company.id]
-      ).catch(() => {});
+        currentUser,
+        sanitizedCompany,
+        workspaceRef.current.companyData[sanitizedCompany.id]
+      ).catch((err) => {
+        const classified = classifyFirestoreError(err);
+        if (classified.category !== 'NETWORK_OFFLINE') {
+          notify(classified.userMessage, 'error');
+        }
+      });
     }
 
     void enqueueMutation({
       id: `mut-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       timestamp: new Date().toISOString(),
-      companyId: company.id,
-      companyName: company.razonSocial,
+      companyId: sanitizedCompany.id,
+      companyName: sanitizedCompany.razonSocial,
       actionType: 'COMPANY_UPDATE',
-      summary: `Actualización perfil fiscal ${company.razonSocial}`,
-      companySnapshot: company,
+      summary: `Actualización perfil fiscal ${sanitizedCompany.razonSocial}`,
+      companySnapshot: sanitizedCompany,
     });
   };
 
   const handleDeleteCompany = (id: string) => {
     const target = workspace.companies.find((c) => c.id === id);
     if (!target || workspace.companies.length <= 1) return;
+
+    const currentUser = googleUserRef.current;
+    if (!canCallerMutateCompany(target, currentUser)) {
+      notify(
+        `Acceso denegado: no puedes eliminar ${target.razonSocial} porque pertenece a otro titular.`,
+        'error'
+      );
+      return;
+    }
 
     setWorkspace((prev) => {
       const remaining = prev.companies.filter((c) => c.id !== id);
@@ -882,8 +1061,13 @@ export default function App() {
       return next;
     });
 
-    if (googleUserRef.current && !simulatedOffline && isOnline) {
-      void deleteCompanyFromFirestore(id).catch(() => {});
+    if (currentUser && !simulatedOffline && isOnline) {
+      void deleteCompanyFromFirestore(id).catch((err) => {
+        const classified = classifyFirestoreError(err);
+        if (classified.category !== 'NETWORK_OFFLINE') {
+          notify(classified.userMessage, 'error');
+        }
+      });
     }
 
     void enqueueMutation({

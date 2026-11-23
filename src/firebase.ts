@@ -65,39 +65,37 @@ function initFirestoreSafe(firebaseApp: FirebaseApp): Firestore {
 export const db: Firestore = initFirestoreSafe(app);
 export const auth: Auth = getAuth(app);
 
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
+import {
+  classifyFirestoreError,
+  EquinoxFirestoreError,
+  type FirestoreErrorInfo,
+  OperationType,
+} from './utils/firestoreErrors';
 
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  };
-}
+export {
+  classifyFirestoreError,
+  EquinoxFirestoreError,
+  OperationType,
+  type ClassifiedFirestoreError,
+  type FirestoreErrorCategory,
+  type FirestoreErrorInfo,
+} from './utils/firestoreErrors';
 
 export function handleFirestoreError(
   error: unknown,
   operationType: OperationType,
   path: string | null
 ): never {
+  if (error instanceof EquinoxFirestoreError) {
+    throw error;
+  }
+
+  const classified = classifyFirestoreError(error);
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: classified.message,
+    category: classified.category,
+    code: classified.code,
+    retryable: classified.retryable,
     authInfo: {
       userId: auth.currentUser?.uid ?? null,
       email: auth.currentUser?.email ?? null,
@@ -113,8 +111,14 @@ export function handleFirestoreError(
     operationType,
     path,
   };
-  console.error('Firestore Error:', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+
+  if (classified.category === 'NETWORK_OFFLINE') {
+    console.warn('Firestore Offline:', JSON.stringify(errInfo));
+  } else {
+    console.error('Firestore Error:', JSON.stringify(errInfo));
+  }
+
+  throw new EquinoxFirestoreError(JSON.stringify(errInfo), errInfo, classified);
 }
 
 export async function testFirestoreConnection(): Promise<boolean> {
@@ -122,11 +126,18 @@ export async function testFirestoreConnection(): Promise<boolean> {
     await getDocFromServer(doc(db, 'test', 'connection'));
     return true;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
+    const classified = classifyFirestoreError(error);
+    if (classified.category === 'NETWORK_OFFLINE') {
       console.warn('Firestore en modo offline: operando sobre caché local persistente.');
       return false;
     }
-    return true;
+    if (
+      classified.category === 'PERMISSION_DENIED' ||
+      classified.category === 'UNAUTHENTICATED'
+    ) {
+      return false;
+    }
+    return false;
   }
 }
 

@@ -239,19 +239,25 @@ export async function checkServerConnectivity(): Promise<boolean> {
   }
 }
 
-export async function fetchServerWorkspace(): Promise<WorkspaceState | null> {
+export async function fetchServerWorkspace(
+  idToken?: string | null
+): Promise<WorkspaceState | null> {
+  if (!idToken) return null;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
+    const timeout = setTimeout(() => controller.abort(), 5000);
     const res = await fetch('/api/workspace', {
       method: 'GET',
       cache: 'no-store',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
       signal: controller.signal,
     });
     clearTimeout(timeout);
     if (!res.ok) return null;
     const data = (await res.json()) as WorkspaceState;
-    if (data && Array.isArray(data.companies) && data.companies.length > 0) {
+    if (data && Array.isArray(data.companies)) {
       return data;
     }
     return null;
@@ -260,19 +266,55 @@ export async function fetchServerWorkspace(): Promise<WorkspaceState | null> {
   }
 }
 
+export interface PushSyncServerResponse {
+  ok: boolean;
+  status: number;
+  error?: string;
+  syncedCount: number;
+  rejectedMutations?: Array<{
+    id: string;
+    companyId: string;
+    actionType: string;
+    status: number;
+    error: string;
+  }>;
+  serverTime?: string;
+  workspace?: WorkspaceState;
+}
+
 export async function pushOutboxToServer(
   mutations: PendingSyncMutation[],
-  activeCompanyId: string
-): Promise<{ ok: boolean; syncedCount: number; serverTime?: string; workspace?: WorkspaceState }> {
+  activeCompanyId: string,
+  idToken?: string | null
+): Promise<PushSyncServerResponse> {
+  if (!idToken) {
+    return {
+      ok: false,
+      status: 401,
+      error: 'Se requiere sesión Google verificada para sincronizar con el servidor.',
+      syncedCount: 0,
+    };
+  }
   try {
     const res = await fetch('/api/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
       body: JSON.stringify({ mutations, activeCompanyId }),
     });
-    if (!res.ok) return { ok: false, syncedCount: 0 };
-    return await res.json();
+    const parsed = (await res.json().catch(() => ({}))) as Partial<PushSyncServerResponse>;
+    return {
+      ok: Boolean(res.ok && parsed.ok),
+      status: res.status,
+      error: parsed.error,
+      syncedCount: Number(parsed.syncedCount || 0),
+      rejectedMutations: Array.isArray(parsed.rejectedMutations) ? parsed.rejectedMutations : [],
+      serverTime: parsed.serverTime,
+      workspace: parsed.workspace,
+    };
   } catch {
-    return { ok: false, syncedCount: 0 };
+    return { ok: false, status: 0, syncedCount: 0 };
   }
 }

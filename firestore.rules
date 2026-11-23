@@ -205,6 +205,24 @@ service cloud.firestore {
           'crmCompleted', 'role', 'updatedAt'
         ]);
       allow delete: if false;
+
+      match /sync_state/{stateId} {
+        allow get: if isVerifiedGoogleUser()
+          && isValidId(userId)
+          && isValidId(stateId)
+          && (request.auth.uid == userId || isSuperAdmin());
+        allow create, update: if isVerifiedGoogleUser()
+          && isValidId(userId)
+          && stateId == 'outbox'
+          && request.auth.uid == userId
+          && incoming().keys().hasAll(['ownerUid', 'processedMutationIds', 'updatedAt'])
+          && incoming().keys().hasOnly(['ownerUid', 'processedMutationIds', 'updatedAt'])
+          && incoming().ownerUid == request.auth.uid
+          && incoming().processedMutationIds is list
+          && incoming().processedMutationIds.size() <= 500
+          && incoming().updatedAt == request.time;
+        allow delete: if false;
+      }
     }
 
     // Private Multi-Account Corporate CRM Profiles (1 Google Email Account = 1 Corporate CRM Profile)

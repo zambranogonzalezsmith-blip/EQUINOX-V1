@@ -56,7 +56,8 @@ export class ErrorBoundary extends React.Component<
       try {
         const parsed = JSON.parse(this.state.message);
         if (parsed && parsed.error && parsed.operationType) {
-          readable = `Error de autorización/sincronización (${parsed.operationType} en ${parsed.path || 'Firestore'}): ${parsed.error}`;
+          const catLabel = parsed.category ? `[${parsed.category}] ` : '';
+          readable = `${catLabel}Error en Firestore (${parsed.operationType} sobre ${parsed.path || 'colección'}): ${parsed.error}`;
         }
       } catch {
         // plain string message

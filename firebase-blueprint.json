@@ -377,12 +377,36 @@
         "excedenteIvaAnteriorCentavos",
         "updatedAt"
       ]
+    },
+    "SyncOutboxState": {
+      "title": "SyncOutboxState",
+      "description": "Registro persistente de mutaciones procesadas para idempotencia offline por usuario.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "processedMutationIds": {
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerUid", "processedMutationIds", "updatedAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "Perfil privado del usuario o cuenta corporativa autenticada con Google."
+    },
+    "/users/{userId}/sync_state/{stateId}": {
+      "schema": { "$ref": "#/entities/SyncOutboxState" },
+      "description": "Estado persistente de idempotencia de sincronización offline del usuario."
     },
     "/crm_profiles/{userId}": {
       "schema": { "$ref": "#/entities/CrmProfile" },
