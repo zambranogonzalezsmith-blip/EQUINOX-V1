@@ -81,9 +81,39 @@ export interface MovimientoInventario {
   fecha: string;
   producto: string;
   tipo: 'ENTRADA' | 'SALIDA' | 'AJUSTE';
+  direccion?: 'INCREMENTO' | 'MERMA';
   concepto: string;
   cantidad: number;
   costo_unitario: string;
+}
+
+export interface MovimientoEstadoCuentaBanco {
+  id: string;
+  fecha: string;
+  referencia: string;
+  descripcion: string;
+  cuentaContable: string;
+  debitoCentavos: number;
+  creditoCentavos: number;
+  conciliadoConAsientoId?: number;
+  tipoPartida?: 'CONCILIADA' | 'EN_TRANSITO_BANCO' | 'NO_REGISTRADA_LIBROS';
+}
+
+export interface ConciliacionBancariaPeriodo {
+  id: string;
+  periodo: string; // YYYY-MM
+  cuentaContable: string; // e.g. 1102 or 1103
+  saldoEstadoCuentaBancoCentavos: number;
+  saldoLibrosCentavos: number;
+  diferenciaCentavos: number;
+  conciliada: boolean;
+  fechaConciliacion: string;
+  observaciones?: string;
+}
+
+export interface ConciliacionBancariaState {
+  movimientosBanco: MovimientoEstadoCuentaBanco[];
+  conciliacionesPorPeriodo: Record<string, ConciliacionBancariaPeriodo>;
 }
 
 export interface CierreContable {
@@ -154,6 +184,7 @@ export interface CompanyDataset {
   documentosFiscales: DocumentoFiscalIVA[];
   retencionesIslr: RetencionISLR[];
   excedenteIvaAnteriorCentavos: number;
+  conciliacionBancaria?: ConciliacionBancariaState;
   updatedAt: string;
 }
 
@@ -190,6 +221,7 @@ export type ActiveTab =
   | 'mayor'
   | 'estados'
   | 'fiscal'
+  | 'conciliacion'
   | 'inventario'
   | 'cierres'
   | 'empresas'

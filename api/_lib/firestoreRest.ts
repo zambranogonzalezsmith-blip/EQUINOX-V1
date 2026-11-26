@@ -181,6 +181,10 @@ function parseLedgerRecord(raw: Record<string, unknown>): CompanyDataset {
       ? (raw.retencionesIslr as CompanyDataset['retencionesIslr'])
       : [],
     excedenteIvaAnteriorCentavos: Number(raw.excedenteIvaAnteriorCentavos || 0),
+    conciliacionBancaria:
+      raw.conciliacionBancaria && typeof raw.conciliacionBancaria === 'object'
+        ? (raw.conciliacionBancaria as CompanyDataset['conciliacionBancaria'])
+        : { movimientosBanco: [], conciliacionesPorPeriodo: {} },
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
   };
 }
@@ -377,6 +381,10 @@ export function createFirestoreRestAdapter(idToken: string): FirestoreWorkspaceA
         documentosFiscales: (dataset.documentosFiscales || []).slice(0, 3000),
         retencionesIslr: (dataset.retencionesIslr || []).slice(0, 3000),
         excedenteIvaAnteriorCentavos: Number(dataset.excedenteIvaAnteriorCentavos || 0),
+        conciliacionBancaria: dataset.conciliacionBancaria || {
+          movimientosBanco: [],
+          conciliacionesPorPeriodo: {},
+        },
       };
 
       if (isNew) {

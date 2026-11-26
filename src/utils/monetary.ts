@@ -5,11 +5,38 @@
 
 export function strToCents(s: string | number | null | undefined): number {
   if (s === null || s === undefined) return 0;
-  let str = String(s).trim().replace(/\s/g, '').replace(',', '.');
+  let str = String(s).trim().replace(/\s/g, '');
   if (str === '') return 0;
   const neg = str.startsWith('-');
   if (neg) str = str.slice(1);
-  // Remove thousand commas if user pasted e.g. 1,234.56 (only if multiple dots/commas existed before)
+  if (str.startsWith('+')) str = str.slice(1);
+
+  const hasDot = str.includes('.');
+  const hasComma = str.includes(',');
+
+  if (hasDot && hasComma) {
+    // El último separador define el decimal; los anteriores son separadores de miles
+    const lastDot = str.lastIndexOf('.');
+    const lastComma = str.lastIndexOf(',');
+    if (lastDot > lastComma) {
+      str = str.replace(/,/g, '');
+    } else {
+      str = str.replace(/\./g, '').replace(',', '.');
+    }
+  } else if (hasComma) {
+    const commaCount = (str.match(/,/g) || []).length;
+    if (commaCount > 1) {
+      str = str.replace(/,/g, '');
+    } else {
+      str = str.replace(',', '.');
+    }
+  } else if (hasDot) {
+    const dotCount = (str.match(/\./g) || []).length;
+    if (dotCount > 1) {
+      str = str.replace(/\./g, '');
+    }
+  }
+
   const m = str.match(/^(\d+)(?:\.(\d+))?$/);
   if (!m) return 0;
   const intPart = m[1];

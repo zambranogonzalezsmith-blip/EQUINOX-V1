@@ -358,6 +358,9 @@
         "excedenteIvaAnteriorCentavos": {
           "type": "number"
         },
+        "conciliacionBancaria": {
+          "type": "object"
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time"

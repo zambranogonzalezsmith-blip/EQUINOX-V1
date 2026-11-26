@@ -111,6 +111,10 @@ function parseLedgerData(ld: DocumentData): CompanyDataset {
     documentosFiscales: Array.isArray(ld.documentosFiscales) ? ld.documentosFiscales : [],
     retencionesIslr: Array.isArray(ld.retencionesIslr) ? ld.retencionesIslr : [],
     excedenteIvaAnteriorCentavos: Number(ld.excedenteIvaAnteriorCentavos || 0),
+    conciliacionBancaria:
+      ld.conciliacionBancaria && typeof ld.conciliacionBancaria === 'object'
+        ? ld.conciliacionBancaria
+        : { movimientosBanco: [], conciliacionesPorPeriodo: {} },
     updatedAt: tsToIso(ld.updatedAt),
   };
 }
@@ -496,6 +500,10 @@ export async function saveLedgerToFirestore(
       documentosFiscales: (dataset.documentosFiscales || []).slice(0, 3000),
       retencionesIslr: (dataset.retencionesIslr || []).slice(0, 3000),
       excedenteIvaAnteriorCentavos: Number(dataset.excedenteIvaAnteriorCentavos || 0),
+      conciliacionBancaria: dataset.conciliacionBancaria || {
+        movimientosBanco: [],
+        conciliacionesPorPeriodo: {},
+      },
     });
 
     if (!snap.exists()) {

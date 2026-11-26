@@ -5,7 +5,11 @@ import fs from 'fs';
 import http from 'http';
 import path from 'path';
 import type { PendingSyncMutation } from './src/types/accounting.ts';
-import { authenticateFirebaseRequest } from './api/_lib/firebaseAuth.ts';
+import {
+  authenticateFirebaseRequest,
+  resolveFirebaseProjectId,
+  resolveFirestoreDatabaseId,
+} from './api/_lib/firebaseAuth.ts';
 import { createFirestoreRestAdapter, FirestoreRestError } from './api/_lib/firestoreRest.ts';
 import {
   handleAuthorizedSyncPost,
@@ -88,9 +92,19 @@ async function startServer() {
     res.sendFile(path.join(publicRoot, 'aviso-legal.html'));
   });
 
-  // Health endpoint for real connectivity & offline auto-sync probe
+  // Health endpoint for real connectivity, observability & offline auto-sync probe
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, serverTime: new Date().toISOString() });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      ok: true,
+      serverTime: new Date().toISOString(),
+      runtime: 'express-node',
+      uptimeSeconds: Math.round(process.uptime()),
+      nodeVersion: process.version,
+      firebaseConfigured: Boolean(resolveFirebaseProjectId()),
+      geminiConfigured: Boolean(ai),
+      databaseId: resolveFirestoreDatabaseId(),
+    });
   });
 
   // Retrieve authorized multi-company workspace from Cloud Firestore

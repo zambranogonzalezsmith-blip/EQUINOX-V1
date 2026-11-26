@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Download } from 'lucide-react';
+import { Download, FileCode2 } from 'lucide-react';
 import {
   CompanyDataset,
   CompanyProfile,
@@ -7,6 +7,13 @@ import {
   DocumentoFiscalIVA,
   RetencionISLR,
 } from '../types/accounting';
+import {
+  computeForma30Summary,
+  computeIslrRetention,
+  generateLibroIvaCsv,
+  generateSeniatIslrXml,
+  generateSeniatRetIvaTxt,
+} from '../utils/fiscalCalculations';
 import { centsToStr, strToCents, todayISO } from '../utils/monetary';
 import { CONCEPTOS_ISLR_VENEZUELA } from '../utils/venezuelaCatalog';
 import { FiscalCalendar } from './FiscalCalendar';
@@ -45,6 +52,7 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
   const [montoExento, setMontoExento] = useState('0.00');
   const [base16, setBase16] = useState('0.00');
   const [base8, setBase8] = useState('0.00');
+  const [base31, setBase31] = useState('0.00');
   const [pctRetIva, setPctRetIva] = useState<0 | 75 | 100>(
     company.agenteRetencionIva || 0
   );
@@ -109,7 +117,8 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
     const exentoCents = strToCents(montoExento);
     const base16Cents = strToCents(base16);
     const base8Cents = strToCents(base8);
-    if (exentoCents + base16Cents + base8Cents <= 0) {
+    const base31Cents = strToCents(base31);
+    if (exentoCents + base16Cents + base8Cents + base31Cents <= 0) {
       onNotify('Debe ingresar al menos un monto base o exento mayor a cero.', 'error');
       return;
     }
@@ -117,12 +126,16 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
     const signo = tipoTrans === '02-Nota Crédito' ? -1 : 1;
     const iva16Cents = Math.round(base16Cents * (company.alicuotaIvaGeneral / 100)) * signo;
     const iva8Cents = Math.round(base8Cents * (company.alicuotaIvaReducida / 100)) * signo;
-    const totalIva = iva16Cents + iva8Cents;
+    const iva31Cents = Math.round(base31Cents * 0.31) * signo;
+    const totalIva = iva16Cents + iva8Cents + iva31Cents;
     const retIvaCents =
       pctRetIva > 0 ? Math.round((Math.abs(totalIva) * pctRetIva) / 100) * signo : 0;
 
     const totalFactura =
-      (exentoCents + base16Cents + base8Cents) * signo + iva16Cents + iva8Cents;
+      (exentoCents + base16Cents + base8Cents + base31Cents) * signo +
+      iva16Cents +
+      iva8Cents +
+      iva31Cents;
     const igtfCents =
       pagadoDivisas && company.sujetoIgtf ? Math.round(Math.abs(totalFactura) * 0.03) : 0;
 
@@ -146,8 +159,8 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
       iva16Centavos: iva16Cents,
       base8Centavos: base8Cents * signo,
       iva8Centavos: iva8Cents,
-      base31Centavos: 0,
-      iva31Centavos: 0,
+      base31Centavos: base31Cents * signo,
+      iva31Centavos: iva31Cents,
       porcentajeRetencionIva: pctRetIva,
       ivaRetenidoCentavos: retIvaCents,
       comprobanteRetencion: compRet,
@@ -169,6 +182,7 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
     setMontoExento('0.00');
     setBase16('0.00');
     setBase8('0.00');
+    setBase31('0.00');
     onNotify(
       `Documento fiscal registrado${compRet ? ` · Comprobante Retención IVA: ${compRet}` : ''}.`,
       'success'
@@ -190,22 +204,18 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
   const conceptoSelected =
     CONCEPTOS_ISLR_VENEZUELA.find((c) => c.codigo === islrCodConcepto) ||
     CONCEPTOS_ISLR_VENEZUELA[0];
-  const islrPct =
-    islrTipoPersona === 'PNR'
-      ? conceptoSelected.porcentajePNR
-      : islrTipoPersona === 'PJD'
-        ? conceptoSelected.porcentajePJD
-        : islrTipoPersona === 'PNNR'
-          ? 34
-          : 34;
   const islrBaseCents = strToCents(islrBase);
-  // Sustraendo PNR = Valor UT * 83.3334 * (% / 100) en centavos
-  const sustraendoCents =
-    islrTipoPersona === 'PNR' && conceptoSelected.aplicaSustraendoPNR
-      ? Math.round(company.unidadTributariaBs * 83.3334 * (islrPct / 100) * 100)
-      : 0;
-  const islrBrutoCents = Math.round((islrBaseCents * islrPct) / 100);
-  const islrNetoRetenidoCents = Math.max(0, islrBrutoCents - sustraendoCents);
+  const islrCalc = computeIslrRetention({
+    montoBaseCentavos: islrBaseCents,
+    tipoPersona: islrTipoPersona,
+    porcentajeTabla:
+      islrTipoPersona === 'PNR' ? conceptoSelected.porcentajePNR : conceptoSelected.porcentajePJD,
+    aplicaSustraendoPNR: conceptoSelected.aplicaSustraendoPNR,
+    unidadTributariaBs: company.unidadTributariaBs,
+  });
+  const islrPct = islrCalc.porcentajeAplicado;
+  const sustraendoCents = islrCalc.sustraendoCentavos;
+  const islrNetoRetenidoCents = islrCalc.montoRetenidoCentavos;
 
   const handleAddIslr = (e: React.FormEvent) => {
     e.preventDefault();
@@ -251,79 +261,66 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
 
   // Forma 30 IVA & IGTF Calculations memoized for selected period (YYYY-MM)
   const forma30 = useMemo(() => {
-    const docsPeriodoVentas = docsVentas.filter((d) => d.fecha.startsWith(periodoFiltro));
+    const baseSummary = computeForma30Summary(
+      dataset.documentosFiscales || [],
+      periodoFiltro,
+      dataset.excedenteIvaAnteriorCentavos || 0
+    );
     const docsPeriodoCompras = docsCompras.filter((d) => d.fecha.startsWith(periodoFiltro));
     const diarioVentasPeriodo = diarioVentas.filter((m) => m.fecha.startsWith(periodoFiltro));
     const diarioComprasPeriodo = diarioCompras.filter((m) => m.fecha.startsWith(periodoFiltro));
 
+    const diarioVentasBase = diarioVentasPeriodo.reduce((a, m) => a + m.credito_centavos, 0);
+    const diarioVentasIva = Math.round(diarioVentasBase * (company.alicuotaIvaGeneral / 100));
+    const diarioComprasBase = diarioComprasPeriodo.reduce((a, m) => a + m.debito_centavos, 0);
+    const diarioComprasIva = Math.round(diarioComprasBase * (company.alicuotaIvaGeneral / 100));
+
     const ventasBasePeriodo =
-      docsPeriodoVentas.reduce((a, d) => a + d.base16Centavos + d.base8Centavos, 0) +
-      diarioVentasPeriodo.reduce((a, m) => a + m.credito_centavos, 0);
-    const ventasExentasPeriodo = docsPeriodoVentas.reduce((a, d) => a + d.exentoCentavos, 0);
-    const debitoFiscalPeriodo =
-      docsPeriodoVentas.reduce((a, d) => a + d.iva16Centavos + d.iva8Centavos, 0) +
-      Math.round(
-        diarioVentasPeriodo.reduce((a, m) => a + m.credito_centavos, 0) *
-          (company.alicuotaIvaGeneral / 100)
-      );
-
+      baseSummary.ventasBase16 +
+      baseSummary.ventasBase8 +
+      baseSummary.ventasBase31 +
+      diarioVentasBase;
+    const debitoFiscalPeriodo = baseSummary.totalDebitoFiscal + diarioVentasIva;
     const comprasBasePeriodo =
-      docsPeriodoCompras.reduce((a, d) => a + d.base16Centavos + d.base8Centavos, 0) +
-      diarioComprasPeriodo.reduce((a, m) => a + m.debito_centavos, 0);
-    const comprasExentasPeriodo = docsPeriodoCompras.reduce((a, d) => a + d.exentoCentavos, 0);
-    const creditoFiscalPeriodo =
-      docsPeriodoCompras.reduce((a, d) => a + d.iva16Centavos + d.iva8Centavos, 0) +
-      Math.round(
-        diarioComprasPeriodo.reduce((a, m) => a + m.debito_centavos, 0) *
-          (company.alicuotaIvaGeneral / 100)
-      );
+      baseSummary.comprasBase16 +
+      baseSummary.comprasBase8 +
+      baseSummary.comprasBase31 +
+      diarioComprasBase;
+    const creditoFiscalPeriodo = baseSummary.totalCreditoFiscal + diarioComprasIva;
 
-    const retencionesIvaSoportadasVentas = docsPeriodoVentas.reduce(
-      (a, d) => a + d.ivaRetenidoCentavos,
-      0
-    );
-    const retencionesIvaEnterarCompras = docsPeriodoCompras.reduce(
-      (a, d) => a + d.ivaRetenidoCentavos,
-      0
-    );
-    const excedenteAnterior = dataset.excedenteIvaAnteriorCentavos || 0;
-    const cuotaTributaria = debitoFiscalPeriodo - creditoFiscalPeriodo - excedenteAnterior;
-    const ivaAPagar =
-      cuotaTributaria > 0 ? Math.max(0, cuotaTributaria - retencionesIvaSoportadasVentas) : 0;
-    const nuevoExcedente = cuotaTributaria < 0 ? Math.abs(cuotaTributaria) : 0;
-
-    const totalIgtfPeriodo =
-      docsPeriodoCompras.reduce((a, d) => a + (d.igtfCentavos || 0), 0) +
-      docsPeriodoVentas.reduce((a, d) => a + (d.igtfCentavos || 0), 0);
+    const cuotaTributaria =
+      debitoFiscalPeriodo - creditoFiscalPeriodo - baseSummary.excedenteAnterior;
+    const netoPostRet = cuotaTributaria - baseSummary.retIvaSufridas;
+    const ivaAPagar = Math.max(0, netoPostRet);
+    const nuevoExcedente = netoPostRet < 0 ? Math.abs(netoPostRet) : 0;
 
     return {
       docsPeriodoCompras,
       ventasBasePeriodo,
-      ventasExentasPeriodo,
+      ventasExentasPeriodo: baseSummary.ventasExentas,
       debitoFiscalPeriodo,
       comprasBasePeriodo,
-      comprasExentasPeriodo,
+      comprasExentasPeriodo: baseSummary.comprasExentas,
       creditoFiscalPeriodo,
-      retencionesIvaSoportadasVentas,
-      retencionesIvaEnterarCompras,
-      excedenteAnterior,
+      retencionesIvaSoportadasVentas: baseSummary.retIvaSufridas,
+      retencionesIvaEnterarCompras: baseSummary.retIvaAplicadas,
+      excedenteAnterior: baseSummary.excedenteAnterior,
       cuotaTributaria,
       ivaAPagar,
       nuevoExcedente,
-      totalIgtfPeriodo,
+      totalIgtfPeriodo: baseSummary.igtfPorPagar,
     };
   }, [
     company.alicuotaIvaGeneral,
+    dataset.documentosFiscales,
     dataset.excedenteIvaAnteriorCentavos,
     diarioCompras,
     diarioVentas,
     docsCompras,
-    docsVentas,
     periodoFiltro,
   ]);
 
   const {
-    docsPeriodoCompras,
     ventasBasePeriodo,
     ventasExentasPeriodo,
     debitoFiscalPeriodo,
@@ -343,48 +340,69 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
   const rifLastDigitMatch = company.rif.match(/(\d)$/);
   const rifTerminal = rifLastDigitMatch ? rifLastDigitMatch[1] : '0';
 
-  const exportRetencionesTXT = () => {
-    const lines = docsPeriodoCompras
-      .filter((d) => d.ivaRetenidoCentavos !== 0)
-      .map((d) => {
-        const rifAgente = company.rif.replace(/-/g, '');
-        const rifSujeto = d.rifTercero.replace(/-/g, '');
-        const periodo = d.fecha.slice(0, 7).replace('-', '');
-        const totalDoc =
-          d.exentoCentavos + d.base16Centavos + d.iva16Centavos + d.base8Centavos + d.iva8Centavos;
-        return [
-          rifAgente,
-          periodo,
-          d.fecha,
-          'C',
-          d.tipoTransaccion.slice(0, 2),
-          rifSujeto,
-          d.numeroFactura,
-          d.numeroControl,
-          (totalDoc / 100).toFixed(2),
-          ((d.base16Centavos + d.base8Centavos) / 100).toFixed(2),
-          (d.ivaRetenidoCentavos / 100).toFixed(2),
-          d.facturaAfectada || '0',
-          d.comprobanteRetencion || '0',
-          (d.exentoCentavos / 100).toFixed(2),
-          company.alicuotaIvaGeneral.toFixed(2),
-          '0',
-        ].join('\t');
-      });
-
-    if (!lines.length) {
-      onNotify('No hay retenciones de IVA en compras para el período seleccionado.', 'error');
-      return;
-    }
-    const blob = new Blob([lines.join('\r\n')], { type: 'text/plain;charset=utf-8;' });
+  const triggerDownload = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `SENIAT_RET_IVA_${company.rif}_${periodoFiltro}.txt`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const exportRetencionesTXT = () => {
+    const { content, rowsCount } = generateSeniatRetIvaTxt(
+      dataset.documentosFiscales || [],
+      company.rif,
+      periodoFiltro
+    );
+    if (!rowsCount) {
+      onNotify('No hay retenciones de IVA en compras para el período seleccionado.', 'error');
+      return;
+    }
+    triggerDownload(
+      content.replace(/\n/g, '\r\n'),
+      `SENIAT_RET_IVA_${company.rif}_${periodoFiltro}.txt`,
+      'text/plain;charset=utf-8;'
+    );
+  };
+
+  const exportLibroCsv = (libro: 'COMPRAS' | 'VENTAS') => {
+    const { content, rowsCount } = generateLibroIvaCsv(
+      dataset.documentosFiscales || [],
+      libro,
+      periodoFiltro,
+      company
+    );
+    if (!rowsCount) {
+      onNotify(`No hay documentos fiscales en el Libro de ${libro} para ${periodoFiltro}.`, 'error');
+      return;
+    }
+    triggerDownload(
+      content,
+      `Libro_${libro}_${company.rif}_${periodoFiltro}.csv`,
+      'text/csv;charset=utf-8;'
+    );
+  };
+
+  const exportIslrXml = () => {
+    const { content, rowsCount } = generateSeniatIslrXml(
+      dataset.retencionesIslr || [],
+      company.rif,
+      periodoFiltro
+    );
+    if (!rowsCount) {
+      onNotify(`No hay retenciones de ISLR para el período ${periodoFiltro}.`, 'error');
+      return;
+    }
+    triggerDownload(
+      content,
+      `SENIAT_ISLR_${company.rif}_${periodoFiltro}.xml`,
+      'application/xml;charset=ISO-8859-1;'
+    );
+    onNotify(`XML RelacionRetencionesISLR (${rowsCount} registro(s)) generado.`, 'success');
   };
 
   return (
@@ -600,6 +618,19 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
                 </div>
 
                 <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-slate-400">
+                    Base Suntuaria (31%)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={base31}
+                    onChange={(e) => setBase31(e.target.value)}
+                    className="rounded-md border border-[#2a3b5c] bg-[#0a0f1d] px-3 py-2 text-right font-mono-tabular text-xs text-slate-100"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-semibold text-slate-400">Retención IVA (%)</label>
                   <select
                     value={pctRetIva}
@@ -636,9 +667,19 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
 
           {/* Libro de Ventas */}
           <div className="rounded-lg border border-[#2a3b5c] bg-[#0d1527] p-6">
-            <h3 className="border-b border-[#2a3b5c] pb-3 text-base font-semibold text-[#c5a059]">
-              Libro de Ventas (Art. 76 Reglamento Ley de IVA)
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2a3b5c] pb-3">
+              <h3 className="text-base font-semibold text-[#c5a059]">
+                Libro de Ventas (Art. 76 Reglamento Ley de IVA)
+              </h3>
+              <button
+                type="button"
+                onClick={() => exportLibroCsv('VENTAS')}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#2a3b5c] bg-[#16223b] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-[#1e2e4f]"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Exportar Libro de Ventas CSV
+              </button>
+            </div>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
@@ -740,14 +781,24 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
               <h3 className="text-base font-semibold text-[#c5a059]">
                 Libro de Compras (Art. 75 Reglamento Ley de IVA)
               </h3>
-              <button
-                type="button"
-                onClick={exportRetencionesTXT}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[#2a3b5c] bg-[#16223b] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-[#1e2e4f]"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Exportar TXT Retenciones SENIAT
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => exportLibroCsv('COMPRAS')}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-[#2a3b5c] bg-[#16223b] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-[#1e2e4f]"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Exportar Libro Compras CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={exportRetencionesTXT}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-[#2a3b5c] bg-[#16223b] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-[#1e2e4f]"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Exportar TXT Retenciones SENIAT
+                </button>
+              </div>
             </div>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full border-collapse text-left text-sm">
@@ -1078,9 +1129,19 @@ export const ImpuestosVenezuelaModule: React.FC<ImpuestosVenezuelaModuleProps> =
           </div>
 
           <div className="rounded-lg border border-[#2a3b5c] bg-[#0d1527] p-6">
-            <h3 className="border-b border-[#2a3b5c] pb-3 text-base font-semibold text-[#c5a059]">
-              Relación Mensual de Retenciones ISLR (XML / AR-CV)
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2a3b5c] pb-3">
+              <h3 className="text-base font-semibold text-[#c5a059]">
+                Relación Mensual de Retenciones ISLR (XML / AR-CV)
+              </h3>
+              <button
+                type="button"
+                onClick={exportIslrXml}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#2a3b5c] bg-[#16223b] px-3 py-1.5 text-xs font-semibold text-[#e5c178] hover:bg-[#1e2e4f]"
+              >
+                <FileCode2 className="h-3.5 w-3.5" />
+                Exportar XML ISLR SENIAT
+              </button>
+            </div>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>

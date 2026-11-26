@@ -144,6 +144,20 @@ function sanitizeDataset(incoming: CompanyDataset): CompanyDataset | null {
       ? incoming.retencionesIslr.slice(0, 3000)
       : [],
     excedenteIvaAnteriorCentavos: Number(incoming.excedenteIvaAnteriorCentavos || 0),
+    conciliacionBancaria:
+      incoming.conciliacionBancaria &&
+      typeof incoming.conciliacionBancaria === 'object'
+        ? {
+            movimientosBanco: Array.isArray(incoming.conciliacionBancaria.movimientosBanco)
+              ? incoming.conciliacionBancaria.movimientosBanco.slice(0, 4000)
+              : [],
+            conciliacionesPorPeriodo:
+              incoming.conciliacionBancaria.conciliacionesPorPeriodo &&
+              typeof incoming.conciliacionBancaria.conciliacionesPorPeriodo === 'object'
+                ? incoming.conciliacionBancaria.conciliacionesPorPeriodo
+                : {},
+          }
+        : { movimientosBanco: [], conciliacionesPorPeriodo: {} },
     updatedAt: String(incoming.updatedAt || new Date().toISOString()),
   };
 }

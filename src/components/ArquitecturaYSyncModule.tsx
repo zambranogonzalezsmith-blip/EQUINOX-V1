@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { User } from 'firebase/auth';
-import { RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { Activity, Download, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import type { DriveBackupPayload } from '../services/googleDriveBackup';
 import {
   CompanyDataset,
@@ -9,6 +9,7 @@ import {
   PendingSyncMutation,
   SyncLogEntry,
 } from '../types/accounting';
+import { auditJournalIntegrity } from '../utils/accountingEngine';
 import { GoogleDriveBackupPanel } from './GoogleDriveBackupPanel';
 
 interface ArquitecturaYSyncModuleProps {
@@ -57,6 +58,70 @@ export const ArquitecturaYSyncModule: React.FC<ArquitecturaYSyncModuleProps> = (
   onNotify,
 }) => {
   const effectiveOnline = isOnline && !simulatedOffline;
+  const [healthProbe, setHealthProbe] = useState<Record<string, unknown> | null>(null);
+  const [probingHealth, setProbingHealth] = useState(false);
+
+  const handleCheckServerHealth = async () => {
+    setProbingHealth(true);
+    try {
+      const res = await fetch('/api/health', { cache: 'no-store' });
+      const data = (await res.json()) as Record<string, unknown>;
+      setHealthProbe(data);
+      onNotify('Diagnóstico de salud /api/health verificado.', 'success');
+    } catch {
+      onNotify('No se pudo conectar con /api/health en este momento.', 'error');
+    } finally {
+      setProbingHealth(false);
+    }
+  };
+
+  const handleExportDiagnostics = () => {
+    const activeDs = companyData[activeCompanyId];
+    const audit = activeDs ? auditJournalIntegrity(activeDs) : null;
+    const diagnosticReport = {
+      generatedAt: new Date().toISOString(),
+      platform: 'Equinox-Books',
+      connectivity: {
+        browserOnline: isOnline,
+        simulatedOffline,
+        effectiveOnline,
+        lastServerSync,
+      },
+      account: {
+        authenticated: Boolean(googleUser),
+        emailVerified: Boolean(googleUser?.emailVerified),
+        driveConnected,
+        companiesCount: companies.length,
+        activeCompanyId,
+      },
+      syncQueue: {
+        pendingMutations: outbox.length,
+        recentLogsCount: syncLogs.length,
+      },
+      accountingIntegrity: audit
+        ? {
+            isHealthy: audit.isHealthy,
+            balancedAsientosCount: audit.balancedAsientosCount,
+            unbalancedCount: audit.unbalancedAsientos.length,
+            orphanLinesCount: audit.orphanLinesCount,
+            equationDiffCentavos: audit.equationDiffCentavos,
+          }
+        : null,
+      serverHealthProbe: healthProbe,
+    };
+
+    const blob = new Blob([JSON.stringify(diagnosticReport, null, 2)], {
+      type: 'application/json;charset=utf-8;',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Equinox_Diagnostico_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-6">
@@ -185,7 +250,32 @@ export const ArquitecturaYSyncModule: React.FC<ArquitecturaYSyncModuleProps> = (
                 ? 'Restablecer Conexión (Auto-Sync)'
                 : 'Simular Corte de Internet'}
             </button>
+
+            <button
+              type="button"
+              onClick={() => void handleCheckServerHealth()}
+              disabled={probingHealth}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#2a3b5c] bg-[#16223b] px-3.5 py-2 text-xs font-semibold text-sky-300 hover:bg-[#1e2e4f] disabled:opacity-50"
+            >
+              <Activity className="h-3.5 w-3.5" />
+              {probingHealth ? 'Verificando API...' : 'Verificar Salud API (/api/health)'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportDiagnostics}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#2a3b5c] bg-[#16223b] px-3.5 py-2 text-xs font-semibold text-[#e5c178] hover:bg-[#1e2e4f]"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Exportar Diagnóstico JSON
+            </button>
           </div>
+
+          {healthProbe && (
+            <pre className="mt-3 overflow-x-auto rounded border border-[#2a3b5c] bg-[#0a0f1d] p-3 font-mono-tabular text-[11px] text-emerald-300">
+              {JSON.stringify(healthProbe, null, 2)}
+            </pre>
+          )}
         </div>
 
         {/* Cola Offline */}

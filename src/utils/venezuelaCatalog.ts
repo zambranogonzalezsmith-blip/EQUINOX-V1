@@ -433,6 +433,10 @@ export function createEmptyCompanyDataset(): CompanyDataset {
     documentosFiscales: [],
     retencionesIslr: [],
     excedenteIvaAnteriorCentavos: 0,
+    conciliacionBancaria: {
+      movimientosBanco: [],
+      conciliacionesPorPeriodo: {},
+    },
     updatedAt: new Date().toISOString(),
   };
 }

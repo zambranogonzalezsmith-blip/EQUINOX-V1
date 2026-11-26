@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { AsientoLinea, CierreContable, CompanyDataset } from '../types/accounting';
+import { getLastDayOfMonthISO } from '../utils/accountingEngine';
 import { centsToStr, nicConvertAmountToBs, todayISO } from '../utils/monetary';
 
 interface CierresYTipoCambioModuleProps {
@@ -76,8 +77,26 @@ export const CierresYTipoCambioModule: React.FC<CierresYTipoCambioModuleProps> =
   };
 
   const ejecutarCierre = (tipo: 'MENSUAL' | 'ANUAL', start: string, end: string, periodo: string) => {
+    const duplicate = (dataset.cierres || []).some(
+      (c) => c.estado === 'ACTIVO' && c.tipo === tipo && c.periodo === periodo
+    );
+    if (duplicate) {
+      onNotify(
+        `Ya existe un cierre ${tipo} ACTIVO para el período ${periodo}. Elimine o reverse el existente antes de generarlo nuevamente.`,
+        'error'
+      );
+      return;
+    }
+
+    const closingAsientoNums = new Set(
+      (dataset.cierres || []).filter((c) => c.estado === 'ACTIVO').map((c) => c.asiento_num)
+    );
     const movimientosPeriodo = dataset.diario.filter(
-      (m) => m.estado === 'ACTIVO' && m.fecha >= start && m.fecha <= end
+      (m) =>
+        m.estado === 'ACTIVO' &&
+        !closingAsientoNums.has(m.asiento_num) &&
+        m.fecha >= start &&
+        m.fecha <= end
     );
     const saldosPorCuenta: Record<string, { deb: number; cred: number }> = {};
     for (const mov of movimientosPeriodo) {
@@ -196,7 +215,7 @@ export const CierresYTipoCambioModule: React.FC<CierresYTipoCambioModuleProps> =
       return;
     }
     const start = `${y}-${String(m).padStart(2, '0')}-01`;
-    const end = new Date(y, m, 0).toISOString().slice(0, 10);
+    const end = getLastDayOfMonthISO(y, m);
     ejecutarCierre('MENSUAL', start, end, `${String(m).padStart(2, '0')}/${y}`);
   };
 

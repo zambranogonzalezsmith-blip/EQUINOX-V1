@@ -9,15 +9,20 @@ Solución contable corporativa multi-empresa configurada para despliegue **multi
   - Manifest completo (`EquinoxBooks`), iconos `192x192`, `512x512`, `maskable 512x512` y `apple-touch-icon.png` para iOS.
   - Precaché automático de activos estáticos y cabeceras `Cache-Control` configuradas en `vercel.json`.
 - **Vercel Serverless Functions (`/api/*.ts`, Node 22 / NodeNext)**:
-  - `GET /api/health`: Sonda de conectividad para el motor de auto-sincronización offline.
+  - `GET /api/health`: Sonda de conectividad y telemetría operativa (`uptimeSeconds`, estado Firebase/Gemini) para el motor de auto-sincronización offline.
   - `GET /api/workspace` y `POST /api/sync`: Endpoints autorizados con verificación RS256 de Firebase ID Token (`Authorization: Bearer`) y persistencia directa en Cloud Firestore (empaquetando `firebase-applet-config.json` vía `includeFiles`).
   - `POST /api/fiscal-calendar`: Consulta del calendario SENIAT Venezuela por terminal de RIF usando Gemini API + Google Search Grounding (`GEMINI_API_KEY` solo en servidor).
+- **Motor Contable, Fiscal y Conciliación**:
+  - **Partida Doble y Auditoría (`src/utils/accountingEngine.ts`)**: Validación estricta de asientos balanceados, detección de descuadres/huérfanas, verificación de Ecuación Patrimonial y cierres contables UTC-safe con Reserva Legal Art. 262 C.Com.
+  - **Motor Fiscal SENIAT (`src/utils/fiscalCalculations.ts`)**: Forma 30 (16%, 8%, 31% suntuario, IGTF 3%), retenciones ISLR Decreto 1.808 (con sustraendo PNR), exportación TXT Ret. IVA, XML Ret. ISLR y CSV Libros Compras/Ventas.
+  - **Conciliación Bancaria e Inventarios NIC 2 (`src/utils/bankReconciliation.ts`, `src/utils/inventoryEngine.ts`)**: Emparejamiento automático CSV vs. Mayor, asientos de ajuste, valuación Promedio Ponderado Móvil con mermas/incrementos y deterioro VNR.
 - **CI/CD en GitHub Actions (`.github/workflows/`)**:
   - `.github/workflows/ci.yml`: Ejecuta validación TypeScript (`npm run lint` y `tsc -p api/tsconfig.json --noEmit`), auditoría de reglas Firestore (`eslint .`), pruebas unitarias (`npm test`) y build de producción (`npm run build`).
   - `.github/workflows/vercel-deploy.yml`: Despliega automáticamente a Vercel Preview (PRs) y Production (`main`) si se configuran los secrets de Vercel en GitHub, o convive limpiamente con la integración Git nativa de Vercel.
-- **Firebase Auth & Cloud Firestore (`gen-lang-client-0084042355`)**:
-  - Autenticación Google por cuenta y aislamiento estricto por usuario (`role: 'user'`), más respaldo individual en Google Drive (`drive.file`).
+- **Firebase Auth, RBAC & Google Drive (`gen-lang-client-0084042355`)**:
+  - Autenticación Google por cuenta y aislamiento estricto por usuario (`role: 'user'`), más respaldo individual en Google Drive (`drive.file`) verificado mediante firma **SHA-256** antes de restaurar (`src/utils/backupSecurity.ts`).
   - Super Usuario y Administrador Global exclusivo: `empresalhadiqainvest@gmail.com` (`role: 'superadmin'`).
+- **Documentación Funcional Completa**: Consulta [`docs/DOCUMENTACION_FUNCIONAL.md`](./docs/DOCUMENTACION_FUNCIONAL.md) para el detalle técnico y normativo de los módulos contables, fiscales y operativos.
 
 ---
 

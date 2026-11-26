@@ -38,6 +38,11 @@ const CierresYTipoCambioModule = lazy(() =>
     default: m.CierresYTipoCambioModule,
   }))
 );
+const ConciliacionBancariaModule = lazy(() =>
+  import('./components/ConciliacionBancariaModule').then((m) => ({
+    default: m.ConciliacionBancariaModule,
+  }))
+);
 const CrmOnboardingModal = lazy(() =>
   import('./components/CrmOnboardingModal').then((m) => ({ default: m.CrmOnboardingModal }))
 );
@@ -115,6 +120,7 @@ import {
 } from './utils/offlineSync';
 import { isSuperAdminEmail, resolveUserRole, SUPER_ADMIN_EMAIL } from './utils/rbac';
 import { reconcileWorkspaceState } from './utils/reconcileWorkspace';
+import { validateDriveRestorePayload } from './utils/backupSecurity';
 import { createEmptyCompanyDataset, DEFAULT_COMPANIES } from './utils/venezuelaCatalog';
 
 const ALLOWED_MUTATION_ACTIONS = new Set<PendingSyncMutation['actionType']>([
@@ -143,6 +149,7 @@ const TABS: Array<{ id: ActiveTab; label: string }> = [
   { id: 'mayor', label: 'Libro Mayor' },
   { id: 'estados', label: 'Estados Financieros' },
   { id: 'fiscal', label: 'Libros Fiscales e Impuestos' },
+  { id: 'conciliacion', label: 'Conciliación Bancaria' },
   { id: 'inventario', label: 'Libro de Inventario' },
   { id: 'cierres', label: 'Cierres' },
   { id: 'empresas', label: 'Múltiples Empresas' },
@@ -1442,38 +1449,43 @@ export default function App() {
         return;
       }
 
-      const currentEmail = (currentUser.email || '').trim().toLowerCase();
-      if (
-        payload.ownerEmail &&
-        currentEmail &&
-        payload.ownerEmail.trim().toLowerCase() !== currentEmail
-      ) {
+      const verification = await validateDriveRestorePayload({
+        payload: payload as unknown as Record<string, unknown>,
+        callerUid: currentUser.uid,
+        callerEmail: currentUser.email || '',
+        callerEmailVerified: currentUser.emailVerified,
+        requireValidChecksum: true,
+      });
+
+      if (!verification.valid || verification.companies.length === 0) {
         notify(
-          `Esta copia pertenece a ${payload.ownerEmail}. Cambia a esa cuenta Google para restaurarla.`,
+          verification.reason || 'El respaldo no superó la verificación de integridad y aislamiento.',
           'error'
         );
         return;
       }
 
       const now = new Date().toISOString();
+      const online = !simulatedOffline && isOnlineRef.current;
 
       if (payload.kind === 'company-books-backup') {
-        const restoredCompany: CompanyProfile = {
-          ...payload.company,
-          ownerUid: currentUser.uid,
-          googleAuthUid: currentUser.uid,
-          googleAuthEmail: currentUser.email || payload.ownerEmail,
-          googleVerified: true,
-          updatedAt: now,
-        };
-        const restoredDataset: CompanyDataset = {
-          ...payload.dataset,
-          updatedAt: now,
-        };
+        const restoredCompany = verification.companies[0];
+        const restoredDataset = verification.companyData[restoredCompany.id];
 
-        if (!simulatedOffline && isOnlineRef.current) {
+        if (online) {
           await saveCompanyToFirestore(currentUser, restoredCompany, restoredDataset);
           await upsertUserProfile(currentUser, restoredCompany.id);
+        } else {
+          await enqueueMutation({
+            id: `mut-restore-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            timestamp: now,
+            companyId: restoredCompany.id,
+            companyName: restoredCompany.razonSocial,
+            actionType: 'COMPANY_CREATE',
+            summary: `Restauración Drive de libros (${restoredCompany.razonSocial})`,
+            companySnapshot: restoredCompany,
+            datasetSnapshot: restoredDataset,
+          });
         }
 
         const prevWs = workspaceRef.current;
@@ -1488,14 +1500,14 @@ export default function App() {
             ...prevWs.companyData,
             [restoredCompany.id]: restoredDataset,
           },
-          lastServerSync: now,
+          lastServerSync: online ? now : prevWs.lastServerSync,
         };
         workspaceRef.current = nextWs;
         setWorkspace(nextWs);
         await saveLocalWorkspace(nextWs);
 
         await appendSyncLog(
-          'SYNCED',
+          online ? 'SYNCED' : 'QUEUED_OFFLINE',
           `Libros de ${restoredCompany.razonSocial} restaurados desde Google Drive (${currentUser.email})`,
           payload.booksSummary.asientosActivos
         );
@@ -1506,21 +1518,24 @@ export default function App() {
         return;
       }
 
-      const restoredCompanies: CompanyProfile[] = payload.companies.map((c) => ({
-        ...c,
-        ownerUid: currentUser.uid,
-        googleAuthUid: currentUser.uid,
-        googleAuthEmail: currentUser.email || payload.ownerEmail,
-        googleVerified: true,
-        updatedAt: now,
-      }));
+      const restoredCompanies = verification.companies;
+      const restoredCompanyData = verification.companyData;
 
-      const restoredCompanyData: Record<string, CompanyDataset> = {};
       for (const comp of restoredCompanies) {
-        const ds = payload.companyData[comp.id] || createEmptyCompanyDataset();
-        restoredCompanyData[comp.id] = ds;
-        if (!simulatedOffline && isOnlineRef.current) {
+        const ds = restoredCompanyData[comp.id] || createEmptyCompanyDataset();
+        if (online) {
           await saveCompanyToFirestore(currentUser, comp, ds);
+        } else {
+          await enqueueMutation({
+            id: `mut-restore-${comp.id}-${Date.now()}`,
+            timestamp: now,
+            companyId: comp.id,
+            companyName: comp.razonSocial,
+            actionType: 'COMPANY_CREATE',
+            summary: `Restauración Drive (${comp.razonSocial})`,
+            companySnapshot: comp,
+            datasetSnapshot: ds,
+          });
         }
       }
 
@@ -1531,46 +1546,41 @@ export default function App() {
           ownerEmail: currentUser.email || payload.ownerEmail,
           updatedAt: now,
         };
-        if (!simulatedOffline && isOnlineRef.current) {
+        if (online) {
           await saveCrmProfileToFirestore(currentUser, normalizedCrm);
         }
         setCrmProfile(normalizedCrm);
       }
 
-      if (restoredCompanies.length > 0) {
-        const targetActiveId = restoredCompanies.some((c) => c.id === payload.activeCompanyId)
-          ? payload.activeCompanyId
-          : restoredCompanies[0].id;
+      const targetActiveId = verification.activeCompanyId || restoredCompanies[0].id;
+      const nextWs: WorkspaceState = {
+        companies: restoredCompanies,
+        activeCompanyId: targetActiveId,
+        companyData: restoredCompanyData,
+        lastServerSync: online ? now : workspaceRef.current.lastServerSync,
+      };
+      workspaceRef.current = nextWs;
+      setWorkspace(nextWs);
+      await saveLocalWorkspace(nextWs);
 
-        const nextWs: WorkspaceState = {
-          companies: restoredCompanies,
-          activeCompanyId: targetActiveId,
-          companyData: restoredCompanyData,
-          lastServerSync: now,
-        };
-        workspaceRef.current = nextWs;
-        setWorkspace(nextWs);
-        await saveLocalWorkspace(nextWs);
-
-        if (!simulatedOffline && isOnlineRef.current) {
-          await upsertUserProfile(currentUser, targetActiveId, {
-            primaryCompanyId: targetActiveId,
-            crmCompleted: Boolean(payload.crmProfile?.completed),
-          });
-        }
+      if (online) {
+        await upsertUserProfile(currentUser, targetActiveId, {
+          primaryCompanyId: targetActiveId,
+          crmCompleted: Boolean(payload.crmProfile?.completed),
+        });
       }
 
       await appendSyncLog(
-        'SYNCED',
+        online ? 'SYNCED' : 'QUEUED_OFFLINE',
         `Restauración desde Google Drive (${currentUser.email}): ${restoredCompanies.length} empresa(s)`,
         restoredCompanies.length
       );
       notify(
-        `Copia de seguridad restaurada para ${currentUser.email}: ${restoredCompanies.length} empresa(s) y libros sincronizados.`,
+        `Copia de seguridad verificada (SHA-256) y restaurada para ${currentUser.email}: ${restoredCompanies.length} empresa(s).`,
         'success'
       );
     },
-    [appendSyncLog, notify, simulatedOffline]
+    [appendSyncLog, enqueueMutation, notify, simulatedOffline]
   );
 
   const activeAsientosCount = useMemo(
@@ -2033,6 +2043,16 @@ export default function App() {
                 dataset={activeDataset}
                 onUpdateDataset={handleUpdateDataset}
                 onJumpToEditAsiento={handleJumpToEditAsiento}
+                onNotify={notify}
+              />
+            )}
+
+            {activeTab === 'conciliacion' && (
+              <ConciliacionBancariaModule
+                key={`conciliacion-${activeCompany.id}`}
+                company={activeCompany}
+                dataset={activeDataset}
+                onUpdateDataset={handleUpdateDataset}
                 onNotify={notify}
               />
             )}

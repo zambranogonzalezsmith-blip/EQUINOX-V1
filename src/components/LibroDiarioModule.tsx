@@ -1,5 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Download, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { AsientoLinea, CompanyDataset } from '../types/accounting';
+import { auditJournalIntegrity, validateJournalEntryLines } from '../utils/accountingEngine';
+import { escapeCsvCell } from '../utils/fiscalCalculations';
 import { centsToStr, formatDateShort, strToCents, todayISO } from '../utils/monetary';
 
 interface FormLine {
@@ -136,46 +139,31 @@ export const LibroDiarioModule: React.FC<LibroDiarioModuleProps> = ({
       return;
     }
 
-    let totalDeb = 0;
-    let totalCred = 0;
-    const validLines: Array<{
-      codigo: string;
-      debito_centavos: number;
-      credito_centavos: number;
-      mov_fecha: string;
-      mov_tercero: string;
-      mov_concepto: string;
-    }> = [];
+    const validation = validateJournalEntryLines(
+      lines.map((l) => ({
+        codigo_cuenta: l.codigo_cuenta,
+        debitoStr: l.debito,
+        creditoStr: l.credito,
+        mov_fecha: l.mov_fecha || asFecha,
+        mov_tercero: l.mov_tercero.trim(),
+        mov_concepto: l.mov_concepto.trim(),
+      })),
+      dataset.catalogo
+    );
 
-    for (const l of lines) {
-      if (!l.codigo_cuenta) continue;
-      const d = strToCents(l.debito);
-      const c = strToCents(l.credito);
-      if (d > 0 || c > 0) {
-        totalDeb += d;
-        totalCred += c;
-        validLines.push({
-          codigo: l.codigo_cuenta,
-          debito_centavos: d,
-          credito_centavos: c,
-          mov_fecha: l.mov_fecha || asFecha,
-          mov_tercero: l.mov_tercero.trim(),
-          mov_concepto: l.mov_concepto.trim(),
-        });
-      }
-    }
-
-    if (validLines.length < 2) {
-      onNotify('Un asiento contable requiere al menos 2 movimientos con monto.', 'error');
+    if (!validation.ok) {
+      onNotify(validation.error || 'Asiento inválido según reglas de partida doble.', 'error');
       return;
     }
-    if (totalDeb !== totalCred) {
-      onNotify(
-        `Error de Partida Doble: Débito (${centsToStr(totalDeb)}) ≠ Crédito (${centsToStr(totalCred)}).`,
-        'error'
-      );
-      return;
-    }
+
+    const validLines = validation.validatedLines.map((l) => ({
+      codigo: l.codigo_cuenta,
+      debito_centavos: l.debito_centavos,
+      credito_centavos: l.credito_centavos,
+      mov_fecha: l.mov_fecha || asFecha,
+      mov_tercero: (l.mov_tercero || '').trim(),
+      mov_concepto: (l.mov_concepto || '').trim(),
+    }));
 
     const tc =
       dataset.exchangeRates && dataset.exchangeRates[asFecha]
@@ -306,18 +294,96 @@ export const LibroDiarioModule: React.FC<LibroDiarioModuleProps> = ({
   const vistosActivos = new Set<number>();
 
   const cuentaByCodigo = (cod: string) => dataset.catalogo.find((c) => c.codigo === cod);
+  const integrityAudit = useMemo(() => auditJournalIntegrity(dataset), [dataset]);
+
+  const handleExportDiarioCsv = () => {
+    if (movs.length === 0) {
+      onNotify('No hay movimientos en el Libro Diario para exportar.', 'error');
+      return;
+    }
+    const header = [
+      'Asiento',
+      'Fecha',
+      'Concepto',
+      'Tercero',
+      'Código',
+      'Cuenta',
+      'Débito',
+      'Crédito',
+      'Estado',
+    ];
+    const rows = movs.map((m) => {
+      const c = cuentaByCodigo(m.codigo_cuenta);
+      return [
+        `#${m.asiento_num}`,
+        formatDateShort(m.fecha),
+        m.mov_concepto || m.concepto || '',
+        m.tercero || m.mov_tercero || '',
+        m.codigo_cuenta,
+        c ? c.nombre : '—',
+        centsToStr(m.debito_centavos),
+        centsToStr(m.credito_centavos),
+        m.estado,
+      ]
+        .map(escapeCsvCell)
+        .join(',');
+    });
+    const csv = '\uFEFF' + [header.map(escapeCsvCell).join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Libro_Diario_${todayISO()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="font-display text-2xl font-bold text-[#e5c178]">
-          Gestión de Libro Diario (Partida Doble)
-        </h2>
-        <p className="mt-1 text-sm text-slate-400">
-          Registro inmutable de transacciones. El sistema valida automáticamente el equilibrio Débito
-          = Crédito con precisión de centavos absoluta.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="font-display text-2xl font-bold text-[#e5c178]">
+            Gestión de Libro Diario (Partida Doble)
+          </h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Registro inmutable de transacciones. El sistema valida automáticamente el equilibrio Débito
+            = Crédito con precisión de centavos absoluta.
+          </p>
+        </div>
+        <div
+          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+            integrityAudit.isHealthy
+              ? 'border-emerald-500/40 bg-emerald-950/30 text-emerald-300'
+              : 'border-rose-500/50 bg-rose-950/30 text-rose-300'
+          }`}
+        >
+          {integrityAudit.isHealthy ? (
+            <ShieldCheck className="h-4 w-4 text-emerald-400" />
+          ) : (
+            <ShieldAlert className="h-4 w-4 text-rose-400" />
+          )}
+          <span>
+            {integrityAudit.isHealthy
+              ? `Auditoría Partida Doble OK · ${integrityAudit.balancedAsientosCount} asiento(s) cuadrado(s)`
+              : `Auditoría: ${integrityAudit.issues.length} incidencia(s) detectada(s)`}
+          </span>
+        </div>
       </div>
+
+      {!integrityAudit.isHealthy && integrityAudit.issues.length > 0 && (
+        <div className="rounded-lg border border-rose-500/40 bg-rose-950/25 p-4 text-xs text-rose-200">
+          <div className="font-semibold text-rose-300">
+            Alertas de Integridad Contable (Partida Doble y Ecuación Patrimonial):
+          </div>
+          <ul className="mt-1.5 list-disc space-y-1 pl-5">
+            {integrityAudit.issues.slice(0, 6).map((iss, idx) => (
+              <li key={idx}>{iss.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Formulario Nuevo Asiento / Modificación */}
       <div className="rounded-lg border border-[#233352] bg-[#0d1527] p-6">
@@ -523,9 +589,19 @@ export const LibroDiarioModule: React.FC<LibroDiarioModuleProps> = ({
 
       {/* Asientos Registrados */}
       <div className="rounded-lg border border-[#233352] bg-[#0d1527] p-6">
-        <h3 className="border-b border-[#233352] pb-3 text-base font-semibold text-[#c5a059]">
-          Asientos Registrados
-        </h3>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#233352] pb-3">
+          <h3 className="text-base font-semibold text-[#c5a059]">
+            Asientos Registrados
+          </h3>
+          <button
+            type="button"
+            onClick={handleExportDiarioCsv}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[#233352] bg-[#16223b] px-3 py-1.5 text-xs font-semibold text-slate-200 transition-colors hover:bg-[#1e2e4f]"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Exportar Libro Diario CSV
+          </button>
+        </div>
 
         <div className="my-4 flex flex-wrap items-center gap-3">
           <select

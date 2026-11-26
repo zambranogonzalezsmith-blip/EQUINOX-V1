@@ -840,15 +840,22 @@ export const GoogleDriveBackupPanel: React.FC<GoogleDriveBackupPanelProps> = ({
                         Verificada sin alteraciones
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 font-semibold text-amber-300">
+                      <span className="inline-flex items-center gap-1 font-semibold text-rose-400">
                         <AlertTriangle className="h-3.5 w-3.5" />
-                        Hash modificado externamente
+                        Hash SHA-256 inválido — Restauración bloqueada
                       </span>
                     )}
                   </div>
                 </>
               )}
             </div>
+
+            {pendingConfirm.type === 'RESTORE' && !pendingConfirm.checksumValid && (
+              <p className="mt-3 rounded border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-xs text-rose-300">
+                Por seguridad contable, no se permite restaurar un respaldo cuyo checksum SHA-256
+                no coincide con el contenido original. Selecciona una copia verificada.
+              </p>
+            )}
 
             <div className="mt-5 flex flex-wrap justify-end gap-3">
               <button
@@ -861,9 +868,12 @@ export const GoogleDriveBackupPanel: React.FC<GoogleDriveBackupPanelProps> = ({
               </button>
               <button
                 type="button"
-                disabled={executingConfirm}
+                disabled={
+                  executingConfirm ||
+                  (pendingConfirm.type === 'RESTORE' && !pendingConfirm.checksumValid)
+                }
                 onClick={() => void handleExecuteConfirmation()}
-                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-4 py-2 text-xs font-bold transition-colors disabled:opacity-50 ${
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-4 py-2 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                   pendingConfirm.type === 'DELETE'
                     ? 'bg-rose-600 text-white hover:bg-rose-500'
                     : 'bg-[#c5a059] text-[#0a0f1d] hover:bg-[#e5c178]'

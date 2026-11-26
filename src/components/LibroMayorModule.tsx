@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { Download } from 'lucide-react';
 import { CompanyDataset } from '../types/accounting';
-import { centsToStr } from '../utils/monetary';
+import { escapeCsvCell } from '../utils/fiscalCalculations';
+import { centsToStr, todayISO } from '../utils/monetary';
 
 interface LibroMayorModuleProps {
   dataset: CompanyDataset;
@@ -120,6 +122,74 @@ export const LibroMayorModule: React.FC<LibroMayorModuleProps> = ({
             })}
           </select>
         )}
+
+        <button
+          type="button"
+          onClick={() => {
+            if (vista === 'resumido') {
+              if (!mayor.length) return;
+              const header = ['Código', 'Cuenta', 'Tipo', 'Naturaleza', 'Total Débitos', 'Total Créditos', 'Saldo Actual'];
+              const rows = mayor.map((m) =>
+                [
+                  m.codigo,
+                  m.nombre,
+                  m.tipo_cuenta,
+                  m.naturaleza,
+                  centsToStr(m.deb),
+                  centsToStr(m.cred),
+                  centsToStr(m.saldo),
+                ]
+                  .map(escapeCsvCell)
+                  .join(',')
+              );
+              const csv = '\uFEFF' + [header.map(escapeCsvCell).join(','), ...rows].join('\n');
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `Libro_Mayor_Resumido_${todayISO()}.csv`;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(url);
+            } else if (selectedCuenta && detailedMovs.length > 0) {
+              let running = 0;
+              const header = ['Fecha', 'Asiento', 'Concepto', 'Tercero', 'Débito', 'Crédito', 'Saldo Progresivo'];
+              const rows = detailedMovs.map((m) => {
+                const delta =
+                  selectedCuenta.naturaleza === 'Débito'
+                    ? m.debito_centavos - m.credito_centavos
+                    : m.credito_centavos - m.debito_centavos;
+                running += delta;
+                return [
+                  m.mov_fecha || m.fecha,
+                  `#${m.asiento_num}`,
+                  m.mov_concepto || m.concepto || '',
+                  m.mov_tercero || m.tercero || '',
+                  centsToStr(m.debito_centavos),
+                  centsToStr(m.credito_centavos),
+                  centsToStr(running),
+                ]
+                  .map(escapeCsvCell)
+                  .join(',');
+              });
+              const csv = '\uFEFF' + [header.map(escapeCsvCell).join(','), ...rows].join('\n');
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `Libro_Mayor_${selectedCuenta.codigo}_${todayISO()}.csv`;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(url);
+            }
+          }}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-[#233352] bg-[#16223b] px-3 py-2 text-xs font-semibold text-slate-200 transition-colors hover:bg-[#1e2e4f]"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Exportar CSV ({vista === 'resumido' ? 'Resumido' : 'Detallado'})
+        </button>
       </div>
 
       {vista === 'resumido' ? (

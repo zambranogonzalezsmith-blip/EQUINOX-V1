@@ -146,7 +146,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'ownerUid', 'companyId', 'catalogo', 'diario', 'nextId',
           'exchangeRates', 'cierres', 'inventario', 'documentosFiscales',
-          'retencionesIslr', 'excedenteIvaAnteriorCentavos', 'updatedAt'
+          'retencionesIslr', 'excedenteIvaAnteriorCentavos', 'conciliacionBancaria', 'updatedAt'
         ])
         && data.ownerUid is string && data.ownerUid.size() <= 128
         && data.companyId is string && data.companyId == companyId && data.companyId.size() <= 128
@@ -159,6 +159,7 @@ service cloud.firestore {
         && data.documentosFiscales is list && data.documentosFiscales.size() <= 3000
         && data.retencionesIslr is list && data.retencionesIslr.size() <= 3000
         && data.excedenteIvaAnteriorCentavos is number
+        && (!data.keys().hasAny(['conciliacionBancaria']) || data.conciliacionBancaria is map)
         && data.updatedAt is timestamp;
     }
 
@@ -316,7 +317,7 @@ service cloud.firestore {
           && incoming().diff(existing()).affectedKeys().hasOnly([
             'catalogo', 'diario', 'nextId', 'exchangeRates', 'cierres',
             'inventario', 'documentosFiscales', 'retencionesIslr',
-            'excedenteIvaAnteriorCentavos', 'updatedAt'
+            'excedenteIvaAnteriorCentavos', 'conciliacionBancaria', 'updatedAt'
           ]);
         allow delete: if isVerifiedGoogleUser() && isValidId(companyId) && isValidId(ledgerId) && (isCompanyOwner(companyId) || isSuperAdmin());
       }

@@ -1,6 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import { Download, X } from 'lucide-react';
 import { CompanyDataset, MovimientoInventario } from '../types/accounting';
+import {
+  computeInventoryValuation,
+  generateInventoryKardexCsv,
+  generateInventoryValuationCsv,
+} from '../utils/inventoryEngine';
 import { centsToStr, strToCents, todayISO } from '../utils/monetary';
 
 interface InventarioNIC2ModuleProps {
@@ -39,15 +44,20 @@ export const InventarioNIC2Module: React.FC<InventarioNIC2ModuleProps> = ({
   const [mFecha, setMFecha] = useState(todayISO());
   const [mProducto, setMProducto] = useState('');
   const [mTipo, setMTipo] = useState<'ENTRADA' | 'SALIDA' | 'AJUSTE'>('ENTRADA');
+  const [mDireccion, setMDireccion] = useState<'INCREMENTO' | 'MERMA'>('INCREMENTO');
   const [mConcepto, setMConcepto] = useState('');
   const [mCantidad, setMCantidad] = useState('');
   const [mCosto, setMCosto] = useState('');
 
   const [kardexCodigo, setKardexCodigo] = useState<string | null>(null);
 
-  const { statsByProduct, movsByProduct } = useMemo(() => {
-    const accum = new Map<string, { entradas: number; salidas: number; valorEntradas: number }>();
+  const { valuationSummary, statsByProduct, movsByProduct } = useMemo(() => {
+    const valuation = computeInventoryValuation(
+      dataset.inventario.productos,
+      dataset.inventario.movimientos
+    );
     const groupedMovs = new Map<string, MovimientoInventario[]>();
+    const entradaSalidaCounts = new Map<string, { entradas: number; salidas: number }>();
 
     for (const m of dataset.inventario.movimientos) {
       let bucket = groupedMovs.get(m.producto);
@@ -57,36 +67,29 @@ export const InventarioNIC2Module: React.FC<InventarioNIC2ModuleProps> = ({
       }
       bucket.push(m);
 
-      let st = accum.get(m.producto);
-      if (!st) {
-        st = { entradas: 0, salidas: 0, valorEntradas: 0 };
-        accum.set(m.producto, st);
-      }
-      const q = Number(m.cantidad) || 0;
-      const c = strToCents(m.costo_unitario);
-      if (m.tipo === 'ENTRADA' || m.tipo === 'AJUSTE') {
-        st.entradas += q;
-        st.valorEntradas += Math.round(q * c);
-      } else if (m.tipo === 'SALIDA') {
-        st.salidas += q;
-      }
+      const prevCount = entradaSalidaCounts.get(m.producto) || { entradas: 0, salidas: 0 };
+      const q = Math.abs(Number(m.cantidad) || 0);
+      const isSalida =
+        m.tipo === 'SALIDA' || (m.tipo === 'AJUSTE' && (m.direccion === 'MERMA' || Number(m.cantidad) < 0));
+      if (isSalida) prevCount.salidas += q;
+      else prevCount.entradas += q;
+      entradaSalidaCounts.set(m.producto, prevCount);
     }
 
     const stats = new Map<string, StockSummary>();
-    for (const [cod, st] of accum.entries()) {
-      const stock = st.entradas - st.salidas;
-      const costoPromCents = st.entradas > 0 ? Math.round(st.valorEntradas / st.entradas) : 0;
-      stats.set(cod, {
-        entradas: st.entradas,
-        salidas: st.salidas,
-        stock,
-        costoPromCents,
-        valorCents: Math.round(stock * costoPromCents),
+    for (const s of valuation.stats) {
+      const cnt = entradaSalidaCounts.get(s.prod.codigo) || { entradas: 0, salidas: 0 };
+      stats.set(s.prod.codigo, {
+        entradas: cnt.entradas,
+        salidas: cnt.salidas,
+        stock: s.stock,
+        costoPromCents: s.costoUnitarioCentavos,
+        valorCents: s.valorCostoCentavos,
       });
     }
 
-    return { statsByProduct: stats, movsByProduct: groupedMovs };
-  }, [dataset.inventario.movimientos]);
+    return { valuationSummary: valuation, statsByProduct: stats, movsByProduct: groupedMovs };
+  }, [dataset.inventario.movimientos, dataset.inventario.productos]);
 
   const handleAddProducto = (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,7 +152,8 @@ export const InventarioNIC2Module: React.FC<InventarioNIC2ModuleProps> = ({
       return;
     }
     const ex = statsByProduct.get(mProducto) || EMPTY_STOCK;
-    if (mTipo === 'SALIDA' && q > ex.stock) {
+    const isReduction = mTipo === 'SALIDA' || (mTipo === 'AJUSTE' && mDireccion === 'MERMA');
+    if (isReduction && q > ex.stock) {
       onNotify(`Stock insuficiente: disponible ${ex.stock}.`, 'error');
       return;
     }
@@ -169,6 +173,7 @@ export const InventarioNIC2Module: React.FC<InventarioNIC2ModuleProps> = ({
                 fecha: mFecha,
                 producto: mProducto,
                 tipo: mTipo,
+                ...(mTipo === 'AJUSTE' ? { direccion: mDireccion } : {}),
                 concepto: mConcepto.trim(),
                 cantidad: q,
                 costo_unitario: mCosto.trim(),
@@ -177,7 +182,7 @@ export const InventarioNIC2Module: React.FC<InventarioNIC2ModuleProps> = ({
           },
         };
       },
-      `Movimiento inventario ${mTipo} (${mProducto})`
+      `Movimiento inventario ${mTipo}${mTipo === 'AJUSTE' ? ` (${mDireccion})` : ''} (${mProducto})`
     );
 
     setMConcepto('');
@@ -361,9 +366,22 @@ export const InventarioNIC2Module: React.FC<InventarioNIC2ModuleProps> = ({
                 >
                   <option value="ENTRADA">Entrada (Compra / Producción)</option>
                   <option value="SALIDA">Salida (Venta / Consumo)</option>
-                  <option value="AJUSTE">Ajuste por Diferencia (+)</option>
+                  <option value="AJUSTE">Ajuste por Diferencia (NIC 2)</option>
                 </select>
               </div>
+              {mTipo === 'AJUSTE' && (
+                <div className="flex flex-col gap-1 sm:col-span-2">
+                  <label className="text-xs font-semibold text-slate-400">Dirección del Ajuste NIC 2</label>
+                  <select
+                    value={mDireccion}
+                    onChange={(e) => setMDireccion(e.target.value as 'INCREMENTO' | 'MERMA')}
+                    className="rounded-md border border-[#233352] bg-[#0a0f1d] px-3 py-2 text-xs text-slate-100"
+                  >
+                    <option value="INCREMENTO">Sobrante / Incremento de Existencia (+)</option>
+                    <option value="MERMA">Merma / Faltante / Deterioro Físico (-)</option>
+                  </select>
+                </div>
+              )}
               <div className="flex flex-col gap-1 sm:col-span-2">
                 <label className="text-xs font-semibold text-slate-400">Producto</label>
                 <select
@@ -440,9 +458,55 @@ export const InventarioNIC2Module: React.FC<InventarioNIC2ModuleProps> = ({
 
       {/* Balance de Inventario Valorado */}
       <div className="rounded-lg border border-[#2a3b5c] bg-[#0d1527] p-6">
-        <h3 className="border-b border-[#2a3b5c] pb-3 text-base font-semibold text-[#c5a059]">
-          Balance de Inventario Valorado (Menor entre Costo y VNR · NIC 2)
-        </h3>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2a3b5c] pb-3">
+          <h3 className="text-base font-semibold text-[#c5a059]">
+            Balance de Inventario Valorado (Menor entre Costo y VNR · NIC 2)
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const csv = generateInventoryValuationCsv(valuationSummary, 'Equinox-Books');
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Inventario_NIC2_${todayISO()}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#2a3b5c] bg-[#16223b] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-[#1e2e4f]"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Exportar Balance CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const csv = generateInventoryKardexCsv(
+                  dataset.inventario.movimientos,
+                  dataset.inventario.productos,
+                  'Equinox-Books'
+                );
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Kardex_Completo_${todayISO()}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#2a3b5c] bg-[#16223b] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-[#1e2e4f]"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Exportar Kardex CSV
+            </button>
+          </div>
+        </div>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
