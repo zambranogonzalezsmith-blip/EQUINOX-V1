@@ -5,8 +5,19 @@ import path from 'path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+function normalizeBase(raw?: string): string {
+  if (!raw || raw.trim() === '') return '/';
+  let b = raw.trim();
+  if (!b.startsWith('/')) b = `/${b}`;
+  if (!b.endsWith('/')) b = `${b}/`;
+  return b;
+}
+
 export default defineConfig(() => {
+  const base = normalizeBase(process.env.VITE_BASE_PATH);
+
   return {
+    base,
     plugins: [
       react(),
       tailwindcss(),
@@ -25,7 +36,7 @@ export default defineConfig(() => {
           'aviso-legal.html',
         ],
         manifest: {
-          id: '/',
+          id: base,
           lang: 'es-VE',
           name: 'Equinox-Books | Sistema Contable Multi-Empresa NIC & SENIAT',
           short_name: 'EquinoxBooks',
@@ -36,23 +47,23 @@ export default defineConfig(() => {
           display: 'standalone',
           display_override: ['window-controls-overlay', 'standalone', 'minimal-ui'],
           categories: ['business', 'finance', 'productivity'],
-          start_url: '/',
-          scope: '/',
+          start_url: base,
+          scope: base,
           icons: [
             {
-              src: '/pwa-192x192.png',
+              src: `${base}pwa-192x192.png`,
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-512x512.png',
+              src: `${base}pwa-512x512.png`,
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-maskable-512x512.png',
+              src: `${base}pwa-maskable-512x512.png`,
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -65,13 +76,13 @@ export default defineConfig(() => {
           skipWaiting: true,
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           navigateFallbackDenylist: [
-            /^\/api\//,
-            /^\/__\//,
-            /^\/privacidad(\.html)?$/,
-            /^\/terminos(\.html)?$/,
-            /^\/aviso-legal(\.html)?$/,
-            /^\/robots\.txt$/,
-            /^\/sitemap\.xml$/,
+            /\/api\//,
+            /\/__\//,
+            /\/privacidad(\.html)?$/,
+            /\/terminos(\.html)?$/,
+            /\/aviso-legal(\.html)?$/,
+            /\/robots\.txt$/,
+            /\/sitemap\.xml$/,
           ],
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           runtimeCaching: [

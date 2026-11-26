@@ -23,9 +23,9 @@ jobs:
       - name: Instalar dependencias
         run: |
           if [ -f package-lock.json ]; then
-            npm ci
+            npm ci --legacy-peer-deps
           else
-            npm install --no-audit --no-fund
+            npm install --legacy-peer-deps --no-audit --no-fund
           fi
 
       - name: Verificar tipos Frontend y Shared (tsc)

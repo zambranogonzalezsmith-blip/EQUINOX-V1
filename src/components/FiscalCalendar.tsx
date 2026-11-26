@@ -177,6 +177,16 @@ export const FiscalCalendar: React.FC<FiscalCalendarProps> = ({
             forceRefresh,
           }),
         });
+        const contentType = res.headers.get('content-type') || '';
+        if (res.status === 404 || res.status === 405 || !contentType.includes('application/json')) {
+          const msg =
+            'La consulta en vivo del calendario SENIAT requiere despliegue con servidor (/api/fiscal-calendar en Vercel). Mostrando respaldo local si está disponible.';
+          setErrorMsg(msg);
+          if (forceRefresh && onNotify) {
+            onNotify(msg, 'error');
+          }
+          return;
+        }
         const data = await res.json();
         if (!res.ok || !data?.ok) {
           const msg = data?.error || 'No se pudo consultar el calendario SENIAT.';

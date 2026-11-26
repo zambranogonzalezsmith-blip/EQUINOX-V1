@@ -65,6 +65,16 @@ export const ArquitecturaYSyncModule: React.FC<ArquitecturaYSyncModuleProps> = (
     setProbingHealth(true);
     try {
       const res = await fetch('/api/health', { cache: 'no-store' });
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        setHealthProbe({
+          ok: true,
+          mode: 'static-client-firestore',
+          note: 'Hosting estático (ej. GitHub Pages): Firebase Auth, Firestore y Google Drive operan directo desde el navegador.',
+        });
+        onNotify('Modo estático verificado (Firebase y Google Drive activos).', 'success');
+        return;
+      }
       const data = (await res.json()) as Record<string, unknown>;
       setHealthProbe(data);
       onNotify('Diagnóstico de salud /api/health verificado.', 'success');

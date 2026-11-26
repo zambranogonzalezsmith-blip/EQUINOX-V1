@@ -357,8 +357,8 @@ export default function App() {
           return;
         }
 
-        // Respaldo directo a Firestore SDK si el endpoint /api/sync devolvió error transitorio (5xx o red)
-        if (res.status === 0 || res.status >= 500) {
+        // Respaldo directo a Firestore SDK si /api/sync no está desplegado (404/405 en GitHub Pages) o devolvió error transitorio (5xx / red)
+        if (res.status === 0 || res.status === 404 || res.status === 405 || res.status >= 500) {
           const latestWs = workspaceRef.current;
           const syncedClientIds = new Set<string>();
           for (const mut of currentQueue) {

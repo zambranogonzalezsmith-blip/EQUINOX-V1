@@ -295,7 +295,7 @@ export const SplashPresentation: React.FC<SplashPresentationProps> = ({
         {/* Enlaces Legales Públicos (Cumplimiento Web & Google OAuth) */}
         <div className="mt-5 flex flex-wrap items-center justify-center gap-4 text-[11px] text-[#94a3b8]">
           <a
-            href="/privacidad.html"
+            href={`${import.meta.env.BASE_URL}privacidad.html`}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-[#e5c178] hover:underline"
@@ -304,7 +304,7 @@ export const SplashPresentation: React.FC<SplashPresentationProps> = ({
           </a>
           <span>&middot;</span>
           <a
-            href="/terminos.html"
+            href={`${import.meta.env.BASE_URL}terminos.html`}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-[#e5c178] hover:underline"
@@ -313,7 +313,7 @@ export const SplashPresentation: React.FC<SplashPresentationProps> = ({
           </a>
           <span>&middot;</span>
           <a
-            href="/aviso-legal.html"
+            href={`${import.meta.env.BASE_URL}aviso-legal.html`}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-[#e5c178] hover:underline"

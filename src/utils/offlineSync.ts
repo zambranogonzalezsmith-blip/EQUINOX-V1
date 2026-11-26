@@ -233,7 +233,13 @@ export async function checkServerConnectivity(): Promise<boolean> {
       signal: controller.signal,
     });
     clearTimeout(timeout);
-    return res.ok;
+    if (res.ok) return true;
+    // En hosting estático (ej. GitHub Pages) no existe servidor /api/* (devuelve 404/405),
+    // pero Firebase Auth, Cloud Firestore y Google Drive operan directamente con conexión a Internet.
+    if (res.status === 404 || res.status === 405) {
+      return typeof navigator !== 'undefined' ? navigator.onLine : true;
+    }
+    return false;
   } catch {
     return false;
   }
