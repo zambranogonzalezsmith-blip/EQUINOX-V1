@@ -1,0 +1,44 @@
+name: CI · Build, Typecheck & Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  verify:
+    name: Validar TypeScript, Reglas Firestore, Tests y Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar dependencias
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Verificar tipos Frontend y Shared (tsc)
+        run: npm run lint
+
+      - name: Verificar tipos Vercel Serverless API (NodeNext)
+        run: npx tsc -p api/tsconfig.json --noEmit
+
+      - name: Auditar reglas de seguridad Firestore (ESLint)
+        run: npx eslint .
+
+      - name: Ejecutar pruebas unitarias
+        run: npm test
+
+      - name: Compilar aplicación de producción (Vite + PWA)
+        run: npm run build

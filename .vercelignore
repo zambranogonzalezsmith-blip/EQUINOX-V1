@@ -4,7 +4,10 @@ dev-dist
 .data
 .git
 .vercel
+.github
+tests
 *.log
+*.tsbuildinfo
 bun.lock
 firestore.rules.test.ts
 security_spec.md

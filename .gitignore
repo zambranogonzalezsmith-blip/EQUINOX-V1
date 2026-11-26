@@ -5,7 +5,9 @@ dev-dist/
 coverage/
 .data/
 .vercel/
+.firebase/
 .DS_Store
 *.log
+*.tsbuildinfo
 .env*
 !.env.example

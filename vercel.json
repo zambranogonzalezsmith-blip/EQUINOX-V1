@@ -1,11 +1,23 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
+  "installCommand": "npm install --no-audit --no-fund",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
     "api/fiscal-calendar.ts": {
       "maxDuration": 30
+    },
+    "api/workspace.ts": {
+      "maxDuration": 30,
+      "includeFiles": "firebase-applet-config.json"
+    },
+    "api/sync.ts": {
+      "maxDuration": 30,
+      "includeFiles": "firebase-applet-config.json"
+    },
+    "api/health.ts": {
+      "maxDuration": 10
     }
   },
   "headers": [

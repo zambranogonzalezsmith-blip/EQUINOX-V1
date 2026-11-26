@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "./**/*.ts",
+    "../src/types/**/*.ts",
+    "../src/utils/rbac.ts",
+    "../src/utils/venezuelaCatalog.ts",
+    "../src/utils/monetary.ts"
+  ]
+}
