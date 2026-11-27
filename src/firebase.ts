@@ -1,8 +1,13 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
+  browserLocalPersistence,
+  browserSessionPersistence,
   getAuth,
+  getRedirectResult,
   GoogleAuthProvider,
+  setPersistence,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   type Auth,
   type User,
@@ -64,6 +69,14 @@ function initFirestoreSafe(firebaseApp: FirebaseApp): Firestore {
 
 export const db: Firestore = initFirestoreSafe(app);
 export const auth: Auth = getAuth(app);
+
+if (typeof window !== 'undefined') {
+  void setPersistence(auth, browserLocalPersistence).catch(() =>
+    setPersistence(auth, browserSessionPersistence).catch(() => undefined)
+  );
+}
+
+import { formatFirebaseAuthError } from './utils/authErrorMessages';
 
 import {
   classifyFirestoreError,
@@ -220,21 +233,66 @@ function createGoogleProvider(
   return provider;
 }
 
+function isPopupBlockedOrUnsupported(err: unknown): boolean {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code?: unknown }).code || '').toLowerCase()
+      : '';
+  return (
+    code === 'auth/popup-blocked' ||
+    code === 'auth/operation-not-supported-in-this-environment'
+  );
+}
+
+function isTopLevelWindow(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.self === window.top;
+  } catch {
+    return false;
+  }
+}
+
+export async function consumeGoogleRedirectResult(): Promise<User | null> {
+  try {
+    const result = await getRedirectResult(auth);
+    if (!result?.user) return null;
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (credential?.accessToken) {
+      setCachedDriveAccessToken(result.user, credential.accessToken);
+    }
+    return result.user;
+  } catch (err) {
+    const host = typeof window !== 'undefined' ? window.location.hostname : undefined;
+    throw new Error(formatFirebaseAuthError(err, host));
+  }
+}
+
 export async function signInWithGoogle(
   forceSelectAccount = true,
   loginHint?: string
-): Promise<User> {
+): Promise<User | null> {
   const provider = createGoogleProvider(
     true,
     forceSelectAccount ? 'select_account' : undefined,
     loginHint
   );
-  const result = await signInWithPopup(auth, provider);
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  if (credential?.accessToken) {
-    setCachedDriveAccessToken(result.user, credential.accessToken);
+  const host = typeof window !== 'undefined' ? window.location.hostname : undefined;
+
+  try {
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (credential?.accessToken) {
+      setCachedDriveAccessToken(result.user, credential.accessToken);
+    }
+    return result.user;
+  } catch (err) {
+    if (isPopupBlockedOrUnsupported(err) && isTopLevelWindow()) {
+      await signInWithRedirect(auth, provider);
+      return null;
+    }
+    throw new Error(formatFirebaseAuthError(err, host));
   }
-  return result.user;
 }
 
 export async function connectGoogleDriveForUser(
@@ -245,7 +303,14 @@ export async function connectGoogleDriveForUser(
     expectedUser?.email ? 'consent' : 'select_account',
     expectedUser?.email || undefined
   );
-  const result = await signInWithPopup(auth, provider);
+  const host = typeof window !== 'undefined' ? window.location.hostname : undefined;
+
+  let result;
+  try {
+    result = await signInWithPopup(auth, provider);
+  } catch (err) {
+    throw new Error(formatFirebaseAuthError(err, host));
+  }
 
   if (expectedUser && result.user.uid !== expectedUser.uid) {
     clearCachedDriveAccessToken();

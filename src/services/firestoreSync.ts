@@ -23,7 +23,7 @@ import {
   TamanoEmpresaCRM,
 } from '../types/accounting';
 import { isSuperAdminEmail, resolveUserRole, type UserProfileRecord } from '../utils/rbac';
-import { createEmptyCompanyDataset } from '../utils/venezuelaCatalog';
+import { createEmptyCompanyDataset, normalizeCompanyDataset } from '../utils/venezuelaCatalog';
 
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -98,25 +98,10 @@ function parseCompanyProfile(
 }
 
 function parseLedgerData(ld: DocumentData): CompanyDataset {
-  return {
-    catalogo: Array.isArray(ld.catalogo) ? ld.catalogo : createEmptyCompanyDataset().catalogo,
-    diario: Array.isArray(ld.diario) ? ld.diario : [],
-    nextId: Number(ld.nextId || 1),
-    exchangeRates: ld.exchangeRates && typeof ld.exchangeRates === 'object' ? ld.exchangeRates : {},
-    cierres: Array.isArray(ld.cierres) ? ld.cierres : [],
-    inventario:
-      ld.inventario && typeof ld.inventario === 'object'
-        ? ld.inventario
-        : { productos: [], movimientos: [], movSeq: 0 },
-    documentosFiscales: Array.isArray(ld.documentosFiscales) ? ld.documentosFiscales : [],
-    retencionesIslr: Array.isArray(ld.retencionesIslr) ? ld.retencionesIslr : [],
-    excedenteIvaAnteriorCentavos: Number(ld.excedenteIvaAnteriorCentavos || 0),
-    conciliacionBancaria:
-      ld.conciliacionBancaria && typeof ld.conciliacionBancaria === 'object'
-        ? ld.conciliacionBancaria
-        : { movimientosBanco: [], conciliacionesPorPeriodo: {} },
+  return normalizeCompanyDataset({
+    ...(ld as Partial<CompanyDataset>),
     updatedAt: tsToIso(ld.updatedAt),
-  };
+  });
 }
 
 export async function upsertUserProfile(

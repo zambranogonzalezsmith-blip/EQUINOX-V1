@@ -11,6 +11,7 @@ interface SplashPresentationProps {
   authPending: boolean;
   authError: string | null;
   isOnline: boolean;
+  simulatedOffline?: boolean;
   onGoogleSignIn: () => Promise<void>;
   onSwitchGoogleAccount: () => Promise<void>;
   onSignOut: () => Promise<void>;
@@ -26,6 +27,7 @@ export const SplashPresentation: React.FC<SplashPresentationProps> = ({
   authPending,
   authError,
   isOnline,
+  simulatedOffline = false,
   onGoogleSignIn,
   onSwitchGoogleAccount,
   onSignOut,
@@ -53,6 +55,8 @@ export const SplashPresentation: React.FC<SplashPresentationProps> = ({
     ? resolveUserRole(googleUser.email, googleUser.emailVerified)
     : null;
   const isSuperAdmin = userRole === 'superadmin';
+  const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+  const canAttemptGoogleSignIn = !simulatedOffline && (isOnline || browserOnline);
 
   return (
     <div
@@ -164,6 +168,26 @@ export const SplashPresentation: React.FC<SplashPresentationProps> = ({
           Contacto &middot; {PROJECT_METADATA.contacto}
         </p>
 
+        {/* Configuración NIC y Servicios Activos */}
+        <div className="mx-auto mt-5 grid max-w-2xl grid-cols-2 gap-2 text-left text-[11px] sm:grid-cols-4">
+          <div className="rounded border border-[#2a3b5c] bg-[#0d1527]/80 px-2.5 py-2">
+            <span className="block font-semibold text-[#e5c178]">Partida Doble</span>
+            <span className="text-[#94a3b8]">Motor Cero-Float</span>
+          </div>
+          <div className="rounded border border-[#2a3b5c] bg-[#0d1527]/80 px-2.5 py-2">
+            <span className="block font-semibold text-[#e5c178]">Normativa NIC</span>
+            <span className="text-[#94a3b8]">NIC 1 · 2 · 7 · 16 · 21</span>
+          </div>
+          <div className="rounded border border-[#2a3b5c] bg-[#0d1527]/80 px-2.5 py-2">
+            <span className="block font-semibold text-[#e5c178]">Fiscal SENIAT</span>
+            <span className="text-[#94a3b8]">IVA · ISLR · IGTF</span>
+          </div>
+          <div className="rounded border border-[#2a3b5c] bg-[#0d1527]/80 px-2.5 py-2">
+            <span className="block font-semibold text-[#e5c178]">Nube &amp; Offline</span>
+            <span className="text-[#94a3b8]">Firestore · Drive · PWA</span>
+          </div>
+        </div>
+
         {/* Gate de Autenticación con Google por Empresa / Corporación */}
         <div className="mx-auto mt-7 max-w-lg rounded-lg border border-[#2a3b5c] bg-[#0d1527]/90 p-5">
           {authLoading ? (
@@ -252,16 +276,19 @@ export const SplashPresentation: React.FC<SplashPresentationProps> = ({
               </p>
 
               {authError && (
-                <p className="rounded border border-rose-500/40 bg-rose-950/30 px-3 py-2 text-xs text-rose-300">
-                  {authError}
-                </p>
+                <div className="rounded border border-rose-500/40 bg-rose-950/30 px-3 py-2 text-xs text-rose-300">
+                  <p>{authError}</p>
+                  <p className="mt-1 text-[11px] text-rose-200/80">
+                    Puedes reintentar el acceso con Google o ingresar directamente al modo local/offline sin perder datos.
+                  </p>
+                </div>
               )}
 
               <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
                 <button
                   type="button"
                   onClick={() => void onGoogleSignIn()}
-                  disabled={authPending || !isOnline}
+                  disabled={authPending || !canAttemptGoogleSignIn}
                   className="inline-flex cursor-pointer items-center gap-2.5 rounded-md bg-[#c5a059] px-7 py-3 font-serif text-sm font-bold tracking-[1.5px] text-black uppercase transition-colors hover:bg-[#e5c178] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
@@ -270,7 +297,11 @@ export const SplashPresentation: React.FC<SplashPresentationProps> = ({
                       d="M21.35 11.1h-9.17v2.98h5.27c-.23 1.45-1.69 4.25-5.27 4.25-3.17 0-5.76-2.62-5.76-5.85s2.59-5.85 5.76-5.85c1.81 0 3.02.77 3.71 1.44l2.53-2.44C16.8 4.12 14.69 3.2 12.18 3.2 7.21 3.2 3.18 7.23 3.18 12.2s4.03 9 9 9c5.19 0 8.64-3.65 8.64-8.79 0-.59-.06-1.04-.14-1.31z"
                     />
                   </svg>
-                  {authPending ? 'Autenticando con Google...' : 'Autenticar con Google e Ingresar'}
+                  {authPending
+                    ? 'Autenticando con Google...'
+                    : authError
+                      ? 'Reintentar con Google'
+                      : 'Autenticar con Google e Ingresar'}
                 </button>
 
                 <button
@@ -278,12 +309,12 @@ export const SplashPresentation: React.FC<SplashPresentationProps> = ({
                   onClick={onEnterSystem}
                   className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-[#c5a059]/60 bg-[#141e33] px-5 py-3 text-xs font-bold text-[#e5c178] transition-colors hover:bg-[#1e2c4a] hover:text-[#f1f5f9]"
                 >
-                  {!isOnline ? (
+                  {!canAttemptGoogleSignIn ? (
                     <WifiOff className="h-3.5 w-3.5 text-amber-400" />
                   ) : (
                     <BookOpen className="h-3.5 w-3.5 text-[#c5a059]" />
                   )}
-                  {isOnline
+                  {canAttemptGoogleSignIn
                     ? 'Ingresar Directamente a los Libros'
                     : 'Ingresar a los Libros (Modo Offline)'}
                 </button>

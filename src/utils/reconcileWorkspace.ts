@@ -4,7 +4,11 @@ import type {
   PendingSyncMutation,
   WorkspaceState,
 } from '../types/accounting.js';
-import { createEmptyCompanyDataset, DEFAULT_COMPANIES } from './venezuelaCatalog.js';
+import {
+  createEmptyCompanyDataset,
+  DEFAULT_COMPANIES,
+  normalizeCompanyDataset,
+} from './venezuelaCatalog.js';
 
 function parseIsoMs(iso?: string | null): number {
   if (!iso) return 0;
@@ -69,9 +73,11 @@ export function reconcileWorkspaceState(
     const locDs = localWs.companyData?.[srvComp.id];
 
     if (locDs && (hasPendingLocalMutation || !srvDs || parseIsoMs(locDs.updatedAt) > parseIsoMs(srvDs.updatedAt))) {
-      reconciledData[srvComp.id] = locDs;
+      reconciledData[srvComp.id] = normalizeCompanyDataset(locDs);
     } else {
-      reconciledData[srvComp.id] = srvDs || locDs || createEmptyCompanyDataset();
+      reconciledData[srvComp.id] = normalizeCompanyDataset(
+        srvDs || locDs || createEmptyCompanyDataset()
+      );
     }
   }
 
@@ -82,8 +88,9 @@ export function reconcileWorkspaceState(
     const preserveUnauthenticatedTemplate = serverCompanies.length === 0 && !locComp.ownerUid;
     if (isPendingCreate || preserveUnauthenticatedTemplate) {
       reconciledMap.set(locComp.id, locComp);
-      reconciledData[locComp.id] =
-        localWs.companyData?.[locComp.id] || createEmptyCompanyDataset();
+      reconciledData[locComp.id] = normalizeCompanyDataset(
+        localWs.companyData?.[locComp.id] || createEmptyCompanyDataset()
+      );
     }
   }
 
@@ -91,7 +98,9 @@ export function reconcileWorkspaceState(
   if (reconciledCompanies.length === 0) {
     reconciledCompanies = DEFAULT_COMPANIES;
     for (const def of DEFAULT_COMPANIES) {
-      reconciledData[def.id] = localWs.companyData?.[def.id] || createEmptyCompanyDataset();
+      reconciledData[def.id] = normalizeCompanyDataset(
+        localWs.companyData?.[def.id] || createEmptyCompanyDataset()
+      );
     }
   }
 

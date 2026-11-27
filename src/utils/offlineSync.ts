@@ -3,7 +3,11 @@ import {
   SyncLogEntry,
   WorkspaceState,
 } from '../types/accounting';
-import { createEmptyCompanyDataset, DEFAULT_COMPANIES } from './venezuelaCatalog';
+import {
+  createEmptyCompanyDataset,
+  DEFAULT_COMPANIES,
+  normalizeCompanyDataset,
+} from './venezuelaCatalog';
 
 const IDB_NAME = 'equinox_books_offline_idb';
 const IDB_VERSION = 1;
@@ -123,11 +127,22 @@ function normalizeWorkspaceState(ws: WorkspaceState): WorkspaceState {
   const activeId = validCompanies.some((c) => c.id === ws.activeCompanyId)
     ? ws.activeCompanyId
     : validCompanies[0].id;
+  const rawCompanyData =
+    ws.companyData && typeof ws.companyData === 'object' ? ws.companyData : {};
+  const normalizedData: WorkspaceState['companyData'] = {};
+  for (const company of validCompanies) {
+    normalizedData[company.id] = normalizeCompanyDataset(rawCompanyData[company.id]);
+  }
+  for (const [id, ds] of Object.entries(rawCompanyData)) {
+    if (!normalizedData[id]) {
+      normalizedData[id] = normalizeCompanyDataset(ds);
+    }
+  }
   return {
     ...ws,
     companies: validCompanies,
     activeCompanyId: activeId,
-    companyData: ws.companyData && typeof ws.companyData === 'object' ? ws.companyData : {},
+    companyData: normalizedData,
   };
 }
 

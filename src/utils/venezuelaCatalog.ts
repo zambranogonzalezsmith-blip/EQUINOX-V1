@@ -441,6 +441,90 @@ export function createEmptyCompanyDataset(): CompanyDataset {
   };
 }
 
+const DEFAULT_NIC_BY_CODE = new Map(CUENTAS_NIC_VENEZUELA.map((c) => [c.codigo, c]));
+
+/**
+ * Normaliza un dataset contable garantizando catálogo NIC/VEN-NIF completo y metadatos
+ * requeridos por NIC 1, NIC 2, NIC 21 y módulos fiscales/conciliación, sin sobrescribir `updatedAt`.
+ */
+export function normalizeCompanyDataset(
+  raw?: Partial<CompanyDataset> | null
+): CompanyDataset {
+  const base = createEmptyCompanyDataset();
+  if (!raw || typeof raw !== 'object') {
+    return base;
+  }
+
+  const rawCatalogo = Array.isArray(raw.catalogo) && raw.catalogo.length > 0 ? raw.catalogo : null;
+  const catalogo: CuentaNIC[] = rawCatalogo
+    ? rawCatalogo.map((c) => {
+        const ref = DEFAULT_NIC_BY_CODE.get(c.codigo);
+        const clasificacion: CuentaNIC['clasificacion_nic'] =
+          c.clasificacion_nic ||
+          ref?.clasificacion_nic ||
+          (c.ubicacion_estado === 'Estado de Resultados'
+            ? 'Resultados'
+            : c.tipo_cuenta === 'Patrimonio'
+              ? 'Patrimonio'
+              : /no corriente/i.test(c.seccion_destino || '')
+                ? 'No Corriente'
+                : 'Corriente');
+        const partidaMonetaria =
+          typeof c.partida_monetaria === 'boolean'
+            ? c.partida_monetaria
+            : ref?.partida_monetaria ?? (c.tipo_cuenta === 'Activo' || c.tipo_cuenta === 'Pasivo');
+        const normaNic = c.norma_nic || ref?.norma_nic || 'NIC 1';
+        return {
+          ...c,
+          clasificacion_nic: clasificacion,
+          partida_monetaria: partidaMonetaria,
+          norma_nic: normaNic,
+        };
+      })
+    : base.catalogo;
+
+  const inventario =
+    raw.inventario &&
+    typeof raw.inventario === 'object' &&
+    Array.isArray(raw.inventario.productos) &&
+    Array.isArray(raw.inventario.movimientos)
+      ? {
+          productos: raw.inventario.productos,
+          movimientos: raw.inventario.movimientos,
+          movSeq: Math.max(0, Number(raw.inventario.movSeq || 0)),
+        }
+      : base.inventario;
+
+  const conciliacionBancaria =
+    raw.conciliacionBancaria &&
+    typeof raw.conciliacionBancaria === 'object' &&
+    Array.isArray(raw.conciliacionBancaria.movimientosBanco)
+      ? {
+          movimientosBanco: raw.conciliacionBancaria.movimientosBanco,
+          conciliacionesPorPeriodo:
+            raw.conciliacionBancaria.conciliacionesPorPeriodo &&
+            typeof raw.conciliacionBancaria.conciliacionesPorPeriodo === 'object'
+              ? raw.conciliacionBancaria.conciliacionesPorPeriodo
+              : {},
+        }
+      : base.conciliacionBancaria;
+
+  return {
+    catalogo,
+    diario: Array.isArray(raw.diario) ? raw.diario : [],
+    nextId: Math.max(1, Number(raw.nextId || 1)),
+    exchangeRates:
+      raw.exchangeRates && typeof raw.exchangeRates === 'object' ? raw.exchangeRates : {},
+    cierres: Array.isArray(raw.cierres) ? raw.cierres : [],
+    inventario,
+    documentosFiscales: Array.isArray(raw.documentosFiscales) ? raw.documentosFiscales : [],
+    retencionesIslr: Array.isArray(raw.retencionesIslr) ? raw.retencionesIslr : [],
+    excedenteIvaAnteriorCentavos: Number(raw.excedenteIvaAnteriorCentavos || 0),
+    conciliacionBancaria,
+    updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : base.updatedAt,
+  };
+}
+
 export const DEFAULT_COMPANIES: CompanyProfile[] = [
   {
     id: 'emp-alhadiqa',
@@ -459,7 +543,7 @@ export const DEFAULT_COMPANIES: CompanyProfile[] = [
     unidadTributariaBs: 9.0,
     contadorNombre: 'Lcdo. Carlos Smith Zambrano G.',
     cpcNumero: 'CPC-98412',
-    periodoFiscalInicio: '01-01',
+    periodoFiscalInicio: '2026-01-01',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   },
@@ -480,7 +564,7 @@ export const DEFAULT_COMPANIES: CompanyProfile[] = [
     unidadTributariaBs: 9.0,
     contadorNombre: 'Lcda. Mariana Briceño V.',
     cpcNumero: 'CPC-74209',
-    periodoFiscalInicio: '01-01',
+    periodoFiscalInicio: '2026-01-01',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   },

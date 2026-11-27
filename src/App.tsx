@@ -79,10 +79,12 @@ import {
   classifyFirestoreError,
   clearCachedDriveAccessToken,
   connectGoogleDriveForUser,
+  consumeGoogleRedirectResult,
   getDriveAccessTokenForUser,
   signInWithGoogle,
   signOutGoogle,
   syncDriveTokenWithAuthUser,
+  testFirestoreConnection,
 } from './firebase';
 import {
   deleteCompanyFromFirestore,
@@ -121,7 +123,11 @@ import {
 import { isSuperAdminEmail, resolveUserRole, SUPER_ADMIN_EMAIL } from './utils/rbac';
 import { reconcileWorkspaceState } from './utils/reconcileWorkspace';
 import { validateDriveRestorePayload } from './utils/backupSecurity';
-import { createEmptyCompanyDataset, DEFAULT_COMPANIES } from './utils/venezuelaCatalog';
+import {
+  createEmptyCompanyDataset,
+  DEFAULT_COMPANIES,
+  normalizeCompanyDataset,
+} from './utils/venezuelaCatalog';
 
 const ALLOWED_MUTATION_ACTIONS = new Set<PendingSyncMutation['actionType']>([
   'DATASET_UPDATE',
@@ -207,6 +213,13 @@ export default function App() {
   const claimCompanyIdRef = useRef<string | null>(null);
   const isOnlineRef = useRef<boolean>(isOnline);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydrationDoneResolveRef = useRef<(() => void) | null>(null);
+  const hydrationDonePromiseRef = useRef<Promise<void> | null>(null);
+  if (!hydrationDonePromiseRef.current) {
+    hydrationDonePromiseRef.current = new Promise<void>((resolve) => {
+      hydrationDoneResolveRef.current = resolve;
+    });
+  }
 
   useEffect(() => {
     outboxRef.current = outbox;
@@ -408,24 +421,31 @@ export default function App() {
     [appendSyncLog, notify, simulatedOffline]
   );
 
-  // Hidratación local-first (IndexedDB)
+  // Hidratación local-first (IndexedDB) + verificación de conectividad
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const [localWs, localOutbox, localLogs] = await Promise.all([
-        loadLocalWorkspace(),
-        loadOutbox(),
-        loadSyncLogs(),
-      ]);
-      if (!mounted) return;
-      workspaceRef.current = localWs;
-      setWorkspace(localWs);
-      outboxRef.current = localOutbox;
-      setOutbox(localOutbox);
-      setSyncLogs(localLogs);
-      setHydrated(true);
+      try {
+        const [localWs, localOutbox, localLogs] = await Promise.all([
+          loadLocalWorkspace(),
+          loadOutbox(),
+          loadSyncLogs(),
+        ]);
+        if (!mounted) return;
+        workspaceRef.current = localWs;
+        setWorkspace(localWs);
+        outboxRef.current = localOutbox;
+        setOutbox(localOutbox);
+        setSyncLogs(localLogs);
+        setHydrated(true);
+      } finally {
+        hydrationDoneResolveRef.current?.();
+      }
 
-      const reachable = await checkServerConnectivity();
+      const [reachable] = await Promise.all([
+        checkServerConnectivity(),
+        testFirestoreConnection(),
+      ]);
       if (!mounted) return;
       setIsOnline(reachable);
     })();
@@ -435,9 +455,30 @@ export default function App() {
     };
   }, []);
 
-  // Listener de Firebase Auth (Google) + carga segura Multi-Empresa desde Firestore
+  // Listener de Firebase Auth (Google) + recuperación de redirect + carga segura Multi-Empresa desde Firestore
   useEffect(() => {
+    let active = true;
+
+    // Failsafe para nunca dejar la UI atrapada verificando sesión si la red es lenta
+    const authTimeout = setTimeout(() => {
+      if (active) setAuthLoading(false);
+    }, 4500);
+
+    void consumeGoogleRedirectResult()
+      .then((redirectUser) => {
+        if (!active || !redirectUser) return;
+        setDriveConnected(Boolean(getDriveAccessTokenForUser(redirectUser.uid, redirectUser.email)));
+        notify(`Sesión Google verificada: ${redirectUser.email}`, 'success');
+      })
+      .catch((err) => {
+        if (!active) return;
+        const msg = err instanceof Error ? err.message : 'No se pudo completar el inicio con Google.';
+        setAuthError(msg);
+      });
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!active) return;
+      clearTimeout(authTimeout);
       syncDriveTokenWithAuthUser(user);
       setGoogleUser(user);
       googleUserRef.current = user;
@@ -456,14 +497,35 @@ export default function App() {
       }
       setAuthError(null);
 
+      // Garantizar que IndexedDB/outbox hayan hidratado antes de reconciliar o vincular compañías
+      if (hydrationDonePromiseRef.current) {
+        await hydrationDonePromiseRef.current;
+      }
+      if (!active || googleUserRef.current?.uid !== user.uid) return;
+
       try {
-        const idToken = await user.getIdToken();
-        await upsertUserProfile(user, workspaceRef.current.activeCompanyId);
+        const idToken = await user.getIdToken().catch(() => null);
+        try {
+          await upsertUserProfile(user, workspaceRef.current.activeCompanyId);
+        } catch (profileErr) {
+          const profClassified = classifyFirestoreError(profileErr);
+          if (profClassified.category !== 'NETWORK_OFFLINE') {
+            throw profileErr;
+          }
+          await appendSyncLog('QUEUED_OFFLINE', profClassified.userMessage, 0);
+        }
+
         const [cloud, fetchedCrm, serverWs] = await Promise.all([
           fetchUserCompaniesAndLedgers(user.uid),
-          fetchCrmProfile(user.uid),
+          fetchCrmProfile(user.uid).catch((crmErr) => {
+            const crmClass = classifyFirestoreError(crmErr);
+            if (crmClass.category === 'NETWORK_OFFLINE') return null;
+            throw crmErr;
+          }),
           fetchServerWorkspace(idToken).catch(() => null),
         ]);
+        if (!active || googleUserRef.current?.uid !== user.uid) return;
+
         setCrmProfile(fetchedCrm);
         if (!fetchedCrm || !fetchedCrm.completed) {
           setShowCrmModal(true);
@@ -497,8 +559,9 @@ export default function App() {
                 googleAuthenticatedAt: now,
                 updatedAt: now,
               };
-              const targetDataset =
-                workspaceRef.current.companyData[localTarget.id] || createEmptyCompanyDataset();
+              const targetDataset = normalizeCompanyDataset(
+                workspaceRef.current.companyData[localTarget.id] || createEmptyCompanyDataset()
+              );
               await saveCompanyToFirestore(user, authenticatedCompany, targetDataset);
               mergedCompanies = [...mergedCompanies, authenticatedCompany];
               mergedData = { ...mergedData, [authenticatedCompany.id]: targetDataset };
@@ -535,6 +598,8 @@ export default function App() {
 
           const authenticatedList: CompanyProfile[] = [];
           const authenticatedData: Record<string, CompanyDataset> = {};
+          const offlineQueueAdditions: PendingSyncMutation[] = [];
+          let cloudSaved = false;
 
           for (const c of baseList) {
             const scopedId = c.id.endsWith(`-${uidSuffix}`) ? c.id : `${c.id}-${uidSuffix}`;
@@ -548,31 +613,65 @@ export default function App() {
               googleAuthenticatedAt: now,
               updatedAt: now,
             };
-            const ds =
+            const ds = normalizeCompanyDataset(
               workspaceRef.current.companyData[scopedId] ||
-              workspaceRef.current.companyData[c.id] ||
-              createEmptyCompanyDataset();
-            await saveCompanyToFirestore(user, authComp, ds);
+                workspaceRef.current.companyData[c.id] ||
+                createEmptyCompanyDataset()
+            );
             authenticatedList.push(authComp);
             authenticatedData[authComp.id] = ds;
+
+            try {
+              await saveCompanyToFirestore(user, authComp, ds);
+              cloudSaved = true;
+            } catch (saveErr) {
+              const saveClass = classifyFirestoreError(saveErr);
+              if (saveClass.category === 'NETWORK_OFFLINE') {
+                offlineQueueAdditions.push({
+                  id: `mut-init-${authComp.id}-${Date.now()}`,
+                  timestamp: now,
+                  companyId: authComp.id,
+                  companyName: authComp.razonSocial,
+                  actionType: 'COMPANY_CREATE',
+                  summary: `Vinculación inicial Google (${authComp.razonSocial})`,
+                  companySnapshot: authComp,
+                  datasetSnapshot: ds,
+                });
+              } else {
+                throw saveErr;
+              }
+            }
           }
 
           const nextWs: WorkspaceState = {
             companies: authenticatedList,
             activeCompanyId: authenticatedList[0].id,
             companyData: authenticatedData,
-            lastServerSync: now,
+            lastServerSync: cloudSaved ? now : workspaceRef.current.lastServerSync,
           };
           workspaceRef.current = nextWs;
           setWorkspace(nextWs);
           await saveLocalWorkspace(nextWs);
           claimCompanyIdRef.current = null;
+
+          if (offlineQueueAdditions.length > 0) {
+            const nextQueue = compactOutboxQueue([...outboxRef.current, ...offlineQueueAdditions]);
+            outboxRef.current = nextQueue;
+            setOutbox(nextQueue);
+            await saveOutbox(nextQueue);
+            await appendSyncLog(
+              'QUEUED_OFFLINE',
+              `Empresas vinculadas localmente; sincronización pendiente (${offlineQueueAdditions.length})`,
+              offlineQueueAdditions.length
+            );
+          }
         }
 
         if (outboxRef.current.length > 0) {
           void syncOutboxNow(true);
         }
       } catch (err) {
+        if (!active) return;
         const classified = classifyFirestoreError(err);
         if (classified.category === 'NETWORK_OFFLINE') {
           await appendSyncLog('QUEUED_OFFLINE', classified.userMessage, 0);
@@ -583,7 +682,11 @@ export default function App() {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      active = false;
+      clearTimeout(authTimeout);
+      unsubscribe();
+    };
   }, [appendSyncLog, notify, syncOutboxNow]);
 
   // Listeners online/offline + sondeo automático de reconexión
@@ -650,8 +753,9 @@ export default function App() {
     workspace.companies.find((c) => c.id === workspace.activeCompanyId) ||
     workspace.companies[0] ||
     DEFAULT_COMPANIES[0];
-  const activeDataset =
-    workspace.companyData[activeCompany.id] || createEmptyCompanyDataset();
+  const activeDataset = normalizeCompanyDataset(
+    workspace.companyData[activeCompany.id] || createEmptyCompanyDataset()
+  );
 
   // Cálculo ejecutivo real para el resumen del Dashboard activo (Balance + Resultado + IVA)
   const executiveSummary = useMemo(() => {
@@ -728,6 +832,10 @@ export default function App() {
     setAuthError(null);
     try {
       const user = await signInWithGoogle(true, loginHint);
+      if (!user) {
+        return;
+      }
+      setIsOnline(true);
       setDriveConnected(Boolean(getDriveAccessTokenForUser(user.uid, user.email)));
       notify(`Sesión Google verificada: ${user.email}`, 'success');
       if (enterAfter) {
@@ -775,6 +883,9 @@ export default function App() {
     claimCompanyIdRef.current = companyId;
     try {
       const user = await signInWithGoogle(true, target.googleAuthEmail);
+      if (!user) {
+        return;
+      }
       setDriveConnected(Boolean(getDriveAccessTokenForUser(user.uid, user.email)));
       const now = new Date().toISOString();
 
@@ -789,7 +900,9 @@ export default function App() {
           googleAuthenticatedAt: now,
           updatedAt: now,
         };
-        const ds = workspaceRef.current.companyData[target.id] || createEmptyCompanyDataset();
+        const ds = normalizeCompanyDataset(
+          workspaceRef.current.companyData[target.id] || createEmptyCompanyDataset()
+        );
         await saveCompanyToFirestore(user, updatedComp, ds);
 
         setWorkspace((prev) => {
@@ -814,6 +927,9 @@ export default function App() {
   const handleAuthenticateAllLocalCompanies = async () => {
     try {
       const user = googleUserRef.current || (await signInWithGoogle(true));
+      if (!user) {
+        return;
+      }
       setDriveConnected(Boolean(getDriveAccessTokenForUser(user.uid, user.email)));
       const now = new Date().toISOString();
       const updatedList: CompanyProfile[] = [];
@@ -828,7 +944,9 @@ export default function App() {
             googleAuthenticatedAt: now,
             updatedAt: now,
           };
-          const ds = workspaceRef.current.companyData[c.id] || createEmptyCompanyDataset();
+          const ds = normalizeCompanyDataset(
+            workspaceRef.current.companyData[c.id] || createEmptyCompanyDataset()
+          );
           await saveCompanyToFirestore(user, linked, ds);
           updatedList.push(linked);
         } else {
@@ -1608,6 +1726,7 @@ export default function App() {
         authPending={authPending}
         authError={authError}
         isOnline={effectiveOnline}
+        simulatedOffline={simulatedOffline}
         onGoogleSignIn={() => handleGoogleSignIn(true)}
         onSwitchGoogleAccount={() => handleGoogleSignIn(false)}
         onSignOut={async () => {
