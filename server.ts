@@ -15,6 +15,11 @@ import {
   handleAuthorizedSyncPost,
   handleAuthorizedWorkspaceGet,
 } from './api/_lib/workspaceService.ts';
+import {
+  buildRobotsTxt,
+  buildSitemapXml,
+  resolveSiteOrigin,
+} from './src/utils/webPublishConfig.ts';
 
 const ai = process.env.GEMINI_API_KEY
   ? new GoogleGenAI({
@@ -90,6 +95,22 @@ async function startServer() {
   });
   app.get('/aviso-legal', (_req, res) => {
     res.sendFile(path.join(publicRoot, 'aviso-legal.html'));
+  });
+
+  app.get('/robots.txt', (req, res) => {
+    const reqOrigin = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.headers['x-forwarded-host'] || req.get('host')}`;
+    const origin = resolveSiteOrigin(process.env) || reqOrigin;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buildRobotsTxt(origin, '/'));
+  });
+
+  app.get('/sitemap.xml', (req, res) => {
+    const reqOrigin = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.headers['x-forwarded-host'] || req.get('host')}`;
+    const origin = resolveSiteOrigin(process.env) || reqOrigin;
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buildSitemapXml(origin, '/'));
   });
 
   // Health endpoint for real connectivity, observability & offline auto-sync probe
@@ -428,6 +449,10 @@ async function startServer() {
     }
   });
 
+  app.use('/api/*', (_req, res) => {
+    res.status(404).json({ ok: false, error: 'Endpoint API no encontrado.' });
+  });
+
   const httpServer = http.createServer(app);
 
   const hmrDisabled = process.env.DISABLE_HMR === 'true';
@@ -445,8 +470,23 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(
+      express.static(distPath, {
+        setHeaders(res, filePath) {
+          if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          } else if (
+            filePath.endsWith('index.html') ||
+            filePath.endsWith('sw.js') ||
+            filePath.endsWith('manifest.webmanifest')
+          ) {
+            res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+          }
+        },
+      })
+    );
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

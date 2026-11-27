@@ -1,0 +1,6 @@
+# Reglas SPA y exclusiones para hosting estático (Netlify / Cloudflare Pages)
+/privacidad /privacidad.html 200
+/terminos /terminos.html 200
+/aviso-legal /aviso-legal.html 200
+/api/* /404.html 404
+/* /index.html 200

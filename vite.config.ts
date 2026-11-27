@@ -5,16 +5,17 @@ import path from 'path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-function normalizeBase(raw?: string): string {
-  if (!raw || raw.trim() === '') return '/';
-  let b = raw.trim();
-  if (!b.startsWith('/')) b = `/${b}`;
-  if (!b.endsWith('/')) b = `${b}/`;
-  return b;
-}
+import {
+  buildRobotsTxt,
+  buildSitemapXml,
+  injectWebPublishMeta,
+  normalizeBasePath,
+  resolveSiteOrigin,
+} from './src/utils/webPublishConfig.ts';
 
 export default defineConfig(() => {
-  const base = normalizeBase(process.env.VITE_BASE_PATH);
+  const base = normalizeBasePath(process.env.VITE_BASE_PATH);
+  const siteOrigin = resolveSiteOrigin(process.env);
 
   return {
     base,
@@ -29,6 +30,8 @@ export default defineConfig(() => {
           'pwa-192x192.png',
           'pwa-512x512.png',
           'pwa-maskable-512x512.png',
+          'og-cover.jpg',
+          '_redirects',
           'robots.txt',
           'sitemap.xml',
           'privacidad.html',
@@ -121,6 +124,35 @@ export default defineConfig(() => {
           type: 'module',
         },
       }),
+      {
+        name: 'equinox-web-publish-seo',
+        transformIndexHtml(html) {
+          return injectWebPublishMeta(html, { base, origin: siteOrigin });
+        },
+        closeBundle(error?: Error): void {
+          if (error) return;
+          const distDir = path.resolve(import.meta.dirname, 'dist');
+          if (!fs.existsSync(distDir)) return;
+
+          // Generar sitemap.xml y robots.txt con base path y dominio resuelto
+          fs.writeFileSync(
+            path.join(distDir, 'sitemap.xml'),
+            buildSitemapXml(siteOrigin, base),
+            'utf8'
+          );
+          fs.writeFileSync(
+            path.join(distDir, 'robots.txt'),
+            buildRobotsTxt(siteOrigin, base),
+            'utf8'
+          );
+
+          // Respaldo SPA 404.html para hosting estático (GitHub Pages / Cloudflare / S3)
+          const indexHtmlPath = path.join(distDir, 'index.html');
+          if (fs.existsSync(indexHtmlPath)) {
+            fs.copyFileSync(indexHtmlPath, path.join(distDir, '404.html'));
+          }
+        },
+      },
       // Copies src/assets into dist/ so root-relative URLs like
       // "/src/assets/images/..." (e.g. generate_image output) still resolve
       // in production builds. Do not remove.

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { User } from 'firebase/auth';
-import { Activity, Download, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { Activity, Copy, Download, ExternalLink, Globe, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import type { DriveBackupPayload } from '../services/googleDriveBackup';
 import {
   CompanyDataset,
@@ -286,6 +286,74 @@ export const ArquitecturaYSyncModule: React.FC<ArquitecturaYSyncModuleProps> = (
               {JSON.stringify(healthProbe, null, 2)}
             </pre>
           )}
+        </div>
+
+        {/* Publicación Web, SEO y Dominio Autorizado */}
+        <div className="rounded-lg border border-[#2a3b5c] bg-[#0d1527] p-5 lg:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2a3b5c] pb-2">
+            <h3 className="inline-flex items-center gap-2 text-base font-semibold text-[#c5a059]">
+              <Globe className="h-4 w-4" />
+              Publicación Web, SEO y Dominio Autorizado
+            </h3>
+            <span className="font-mono-tabular text-[11px] text-[#94a3b8]">
+              Base Path: <strong className="text-[#e5c178]">{import.meta.env.BASE_URL}</strong>
+            </span>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2 text-xs">
+              <p className="text-[#94a3b8]">
+                Origen web actual (para Google Cloud OAuth &amp; Firebase Authorized Domains):
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="rounded border border-[#2a3b5c] bg-[#0a0f1d] px-2.5 py-1.5 font-mono-tabular text-[#e5c178]">
+                  {typeof window !== 'undefined' ? window.location.hostname : 'localhost'}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const host =
+                      typeof window !== 'undefined' ? window.location.hostname : '';
+                    if (host && navigator.clipboard) {
+                      void navigator.clipboard.writeText(host);
+                      onNotify(`Dominio "${host}" copiado al portapapeles.`, 'success');
+                    }
+                  }}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded border border-[#2a3b5c] bg-[#16223b] px-3 py-1.5 text-xs font-semibold text-[#f1f5f9] hover:border-[#c5a059]"
+                >
+                  <Copy className="h-3.5 w-3.5 text-[#c5a059]" />
+                  Copiar Dominio
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <p className="text-[#94a3b8]">
+                Recursos públicos de indexación, PWA y cumplimiento web:
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: 'robots.txt', path: 'robots.txt' },
+                  { label: 'sitemap.xml', path: 'sitemap.xml' },
+                  { label: 'manifest.webmanifest', path: 'manifest.webmanifest' },
+                  { label: 'privacidad.html', path: 'privacidad.html' },
+                  { label: 'terminos.html', path: 'terminos.html' },
+                  { label: 'aviso-legal.html', path: 'aviso-legal.html' },
+                ].map((item) => (
+                  <a
+                    key={item.path}
+                    href={`${import.meta.env.BASE_URL}${item.path}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded border border-[#2a3b5c] bg-[#0a0f1d] px-2.5 py-1 font-mono-tabular text-[11px] text-[#38edf8] hover:border-[#c5a059]"
+                  >
+                    {item.label}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Cola Offline */}
