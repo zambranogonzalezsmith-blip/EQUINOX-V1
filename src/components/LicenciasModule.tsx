@@ -137,28 +137,28 @@ export const LicenciasModule: React.FC<LicenciasModuleProps> = ({
             </>
           )}
           <a
-            href="/privacidad.html"
+            href={`${import.meta.env.BASE_URL}privacidad.html`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center rounded-md border border-[#2a3b5c] bg-[#0a0f1d] px-3 py-2 font-mono-tabular text-[11px] text-[#38edf8] hover:border-[#38edf8]"
           >
-            /privacidad.html
+            privacidad.html
           </a>
           <a
-            href="/terminos.html"
+            href={`${import.meta.env.BASE_URL}terminos.html`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center rounded-md border border-[#2a3b5c] bg-[#0a0f1d] px-3 py-2 font-mono-tabular text-[11px] text-[#38edf8] hover:border-[#38edf8]"
           >
-            /terminos.html
+            terminos.html
           </a>
           <a
-            href="/aviso-legal.html"
+            href={`${import.meta.env.BASE_URL}aviso-legal.html`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center rounded-md border border-[#2a3b5c] bg-[#0a0f1d] px-3 py-2 font-mono-tabular text-[11px] text-[#38edf8] hover:border-[#38edf8]"
           >
-            /aviso-legal.html
+            aviso-legal.html
           </a>
         </div>
       </div>

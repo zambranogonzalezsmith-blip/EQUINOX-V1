@@ -114,12 +114,12 @@ export const LegalComplianceModal: React.FC<LegalComplianceModalProps> = ({
                   Política de Privacidad y Protección de Datos
                 </h3>
                 <a
-                  href="/privacidad.html"
+                  href={`${import.meta.env.BASE_URL}privacidad.html`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#38edf8] hover:underline"
                 >
-                  Abrir URL Pública (/privacidad.html)
+                  Abrir URL Pública ({import.meta.env.BASE_URL}privacidad.html)
                   <ExternalLink className="h-3 w-3" />
                 </a>
               </div>
@@ -157,12 +157,12 @@ export const LegalComplianceModal: React.FC<LegalComplianceModalProps> = ({
                   Términos y Condiciones de Servicio
                 </h3>
                 <a
-                  href="/terminos.html"
+                  href={`${import.meta.env.BASE_URL}terminos.html`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#38edf8] hover:underline"
                 >
-                  Abrir URL Pública (/terminos.html)
+                  Abrir URL Pública ({import.meta.env.BASE_URL}terminos.html)
                   <ExternalLink className="h-3 w-3" />
                 </a>
               </div>
@@ -196,12 +196,12 @@ export const LegalComplianceModal: React.FC<LegalComplianceModalProps> = ({
                   Aviso Legal, Patente y Política de Almacenamiento Local
                 </h3>
                 <a
-                  href="/aviso-legal.html"
+                  href={`${import.meta.env.BASE_URL}aviso-legal.html`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#38edf8] hover:underline"
                 >
-                  Abrir URL Pública (/aviso-legal.html)
+                  Abrir URL Pública ({import.meta.env.BASE_URL}aviso-legal.html)
                   <ExternalLink className="h-3 w-3" />
                 </a>
               </div>

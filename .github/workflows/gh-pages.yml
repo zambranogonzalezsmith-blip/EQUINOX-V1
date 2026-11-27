@@ -18,8 +18,6 @@ jobs:
   build:
     name: Compilar Vite + PWA para GitHub Pages
     runs-on: ubuntu-latest
-    outputs:
-      pages_ready: ${{ steps.pages.outcome == 'success' && 'true' || 'false' }}
 
     steps:
       - name: Checkout del repositorio
@@ -40,17 +38,20 @@ jobs:
 
       - name: Configurar GitHub Pages
         id: pages
-        continue-on-error: true
         uses: actions/configure-pages@v5
 
       - name: Resolver base path de Vite para GitHub Pages
         run: |
           RAW_BASE="${{ steps.pages.outputs.base_path }}"
-          if [ -z "$RAW_BASE" ]; then
-            echo "VITE_BASE_PATH=/" >> "$GITHUB_ENV"
+          if [ -n "$RAW_BASE" ]; then
+            RESOLVED_BASE="${RAW_BASE%/}/"
+          elif [ "${{ github.event.repository.name }}" = "${{ github.repository_owner }}.github.io" ]; then
+            RESOLVED_BASE="/"
           else
-            echo "VITE_BASE_PATH=${RAW_BASE%/}/" >> "$GITHUB_ENV"
+            RESOLVED_BASE="/${{ github.event.repository.name }}/"
           fi
+          echo "VITE_BASE_PATH=${RESOLVED_BASE}" >> "$GITHUB_ENV"
+          echo "Base path configurado: ${RESOLVED_BASE}"
 
       - name: Compilar aplicación estática (dist/)
         run: |
@@ -58,15 +59,31 @@ jobs:
           cp dist/index.html dist/404.html
           touch dist/.nojekyll
 
-      - name: Subir artefacto de GitHub Pages
-        if: steps.pages.outcome == 'success'
+      - name: Verificar artefacto compilado en dist/
+        run: |
+          test -f dist/index.html
+          test -f dist/404.html
+          test -f dist/.nojekyll
+          test -f dist/manifest.webmanifest
+          test -f dist/sw.js
+          test -d dist/assets
+          if grep -q '/src/main\.tsx' dist/index.html; then
+            echo "ERROR: dist/index.html sigue apuntando a /src/main.tsx en lugar de los bundles compilados."
+            exit 1
+          fi
+          if ! grep -q "${VITE_BASE_PATH}assets/" dist/index.html; then
+            echo "ERROR: dist/index.html no contiene referencias a ${VITE_BASE_PATH}assets/."
+            exit 1
+          fi
+          echo "Verificación de dist/ aprobada con base ${VITE_BASE_PATH}."
+
+      - name: Subir artefacto de GitHub Pages (solo dist/)
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist
 
   deploy:
     name: Publicar en GitHub Pages
-    if: needs.build.outputs.pages_ready == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -75,5 +92,4 @@ jobs:
     steps:
       - name: Desplegar en GitHub Pages
         id: deployment
-        continue-on-error: true
         uses: actions/deploy-pages@v4
